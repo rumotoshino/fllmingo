@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
     watcher = asyncio.create_task(watch_config())
     probe = asyncio.create_task(health_probe_loop())
     logger.info("╔══════════════════════════════════════════╗")
-    logger.info("║  FLLMingo v1.2.1b1 — [SYSTEM ACTIVE]     ║")
+    logger.info("║  FLLMingo v1.3.0b1 — [SYSTEM ACTIVE]     ║")
     logger.info("╚══════════════════════════════════════════╝")
     yield
     watcher.cancel()
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     await _http_client.aclose()
 
 
-app = FastAPI(title="FLLMingo", version="1.2.1b1", lifespan=lifespan)
+app = FastAPI(title="FLLMingo", version="1.3.0b1", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -313,12 +313,27 @@ async def list_models(_=Depends(verify_auth)):
     """Return available models (OpenAI-compatible)."""
     cfg = get_config()
     models_list = []
+    # Aliases — first-class public model names that route to tiers
+    aliases = cfg.get("routing", {}).get("aliases", {}) or {}
+    for alias_name, alias_def in aliases.items():
+        if isinstance(alias_def, dict):
+            entry = {
+                "id": alias_def.get("display_name") or alias_name,
+                "object": "model",
+                "owned_by": alias_def.get("owned_by", "fllmingo"),
+                "fllmingo_alias_for": alias_def.get("tier", ""),
+            }
+            if alias_def.get("description"):
+                entry["description"] = alias_def["description"]
+            models_list.append(entry)
+        # legacy string aliases stay hidden from /v1/models so they don't pollute listings
     # Tier names as "models"
     for tier_name in cfg.get("tiers", {}):
         models_list.append({
             "id": tier_name,
             "object": "model",
-            "owned_by": "llm-router",
+            "owned_by": "fllmingo",
+            "fllmingo_tier": True,
         })
     # Actual models from providers
     for prov_name, prov_cfg in cfg.get("providers", {}).items():
@@ -1360,6 +1375,120 @@ async def health_probe_loop():
         except Exception as e:
             logger.warning(f"Health probe loop error: {e}")
             await asyncio.sleep(60)
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Public Model Aliases (rich names like "GPT5" routing to tiers)
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/aliases")
+async def api_list_aliases():
+    """List all aliases, normalized to rich shape."""
+    cfg = get_config()
+    aliases = cfg.get("routing", {}).get("aliases", {}) or {}
+    result = []
+    for name, val in aliases.items():
+        if isinstance(val, dict):
+            result.append({
+                "name": name,
+                "tier": val.get("tier", ""),
+                "display_name": val.get("display_name", name),
+                "description": val.get("description", ""),
+                "owned_by": val.get("owned_by", "fllmingo"),
+                "rich": True,
+            })
+        else:
+            result.append({
+                "name": name,
+                "tier": str(val),
+                "display_name": name,
+                "description": "",
+                "owned_by": "fllmingo",
+                "rich": False,
+            })
+    return result
+
+
+@app.post("/api/aliases")
+async def api_create_alias(request: Request):
+    """Create a new public model alias."""
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    tier = (body.get("tier") or "").strip()
+    if not name:
+        raise HTTPException(400, "Name is required")
+    if not tier:
+        raise HTTPException(400, "Target tier is required")
+    cfg = get_config()
+    if tier not in cfg.get("tiers", {}):
+        raise HTTPException(404, f"Tier '{tier}' not found")
+    routing = cfg.setdefault("routing", {})
+    aliases = routing.setdefault("aliases", {})
+    if name in aliases:
+        raise HTTPException(409, f"Alias '{name}' already exists")
+    aliases[name] = {
+        "tier": tier,
+        "display_name": (body.get("display_name") or name).strip(),
+        "description": (body.get("description") or "").strip(),
+        "owned_by": (body.get("owned_by") or "fllmingo").strip(),
+    }
+    _save_config_yaml(cfg)
+    return {"status": "ok", "name": name}
+
+
+@app.put("/api/aliases/{name}")
+async def api_update_alias(name: str, request: Request):
+    """Update an existing alias."""
+    body = await request.json()
+    cfg = get_config()
+    routing = cfg.setdefault("routing", {})
+    aliases = routing.setdefault("aliases", {})
+    if name not in aliases:
+        raise HTTPException(404, f"Alias '{name}' not found")
+
+    # Normalize the entry to dict shape on update
+    cur = aliases[name]
+    if not isinstance(cur, dict):
+        cur = {"tier": str(cur), "display_name": name, "description": "", "owned_by": "fllmingo"}
+
+    tier = body.get("tier")
+    if tier is not None:
+        if tier not in cfg.get("tiers", {}):
+            raise HTTPException(404, f"Tier '{tier}' not found")
+        cur["tier"] = tier
+    if "display_name" in body:
+        cur["display_name"] = (body["display_name"] or name).strip()
+    if "description" in body:
+        cur["description"] = (body["description"] or "").strip()
+    if "owned_by" in body:
+        cur["owned_by"] = (body["owned_by"] or "fllmingo").strip()
+
+    new_name = (body.get("rename") or "").strip()
+    if new_name and new_name != name:
+        if new_name in aliases:
+            raise HTTPException(409, f"Alias '{new_name}' already exists")
+        del aliases[name]
+        aliases[new_name] = cur
+        name = new_name
+    else:
+        aliases[name] = cur
+
+    _save_config_yaml(cfg)
+    return {"status": "ok", "name": name}
+
+
+@app.delete("/api/aliases/{name}")
+async def api_delete_alias(name: str):
+    """Remove an alias."""
+    cfg = get_config()
+    aliases = cfg.get("routing", {}).get("aliases", {})
+    if name not in aliases:
+        raise HTTPException(404, f"Alias '{name}' not found")
+    del aliases[name]
+    _save_config_yaml(cfg)
+    return {"status": "ok", "deleted": name}
 
 
 # ═══════════════════════════════════════════════════════════════════

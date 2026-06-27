@@ -243,6 +243,31 @@
 <!-- ── TIERS PAGE ── -->
 <section class="page" id="page-tiers">
     <div class="panel">
+        <div class="panel-header">🦩 PUBLIC MODEL ALIASES
+            <button class="term-btn-sm" onclick="showCreateAlias()">[+ NEW ALIAS]</button>
+        </div>
+        <div style="padding:8px 12px 4px 12px" class="muted" style="font-size:11px">
+            Aliases appear as first-class models in <code>/v1/models</code>. Clients see <code>GPT5</code> or <code>fast-claude</code> instead of <code>standard</code> or <code>complex</code>.
+        </div>
+        <div class="table-wrap">
+            <table class="term-table">
+                <thead>
+                    <tr>
+                        <th>PUBLIC NAME</th>
+                        <th>ROUTES TO TIER</th>
+                        <th>DISPLAY NAME</th>
+                        <th>DESCRIPTION</th>
+                        <th>ACTIONS</th>
+                    </tr>
+                </thead>
+                <tbody id="aliasesBody">
+                    <tr><td colspan="5" class="muted">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
         <div class="panel-header">TIER MANAGEMENT
             <button class="term-btn-sm" onclick="showAddTierModal()">[+ NEW TIER]</button>
         </div>
@@ -284,6 +309,46 @@
             </div>
         </div>
     </div>
+
+    <!-- Alias create/edit modal -->
+    <div class="modal-overlay" id="aliasModal" style="display:none">
+        <div class="modal-box" style="max-width:500px">
+            <div class="panel-header">
+                <span id="aliasModalTitle">NEW ALIAS</span>
+                <button class="term-btn-sm" onclick="closeModal('aliasModal')">[X]</button>
+            </div>
+            <div style="padding:16px">
+                <div class="form-row">
+                    <label>PUBLIC NAME (what clients see)</label>
+                    <input type="text" id="aliasName" class="term-input full" placeholder="e.g. GPT5 or fast-claude">
+                </div>
+                <div class="form-row">
+                    <label>ROUTES TO TIER</label>
+                    <select id="aliasTier" class="term-select full">
+                        <option value="">-- select tier --</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>DISPLAY NAME (optional, shown in <code>/v1/models</code>)</label>
+                    <input type="text" id="aliasDisplay" class="term-input full" placeholder="defaults to public name">
+                </div>
+                <div class="form-row">
+                    <label>OWNED BY (optional)</label>
+                    <input type="text" id="aliasOwnedBy" class="term-input full" placeholder="fllmingo">
+                </div>
+                <div class="form-row">
+                    <label>DESCRIPTION (optional)</label>
+                    <input type="text" id="aliasDescription" class="term-input full" placeholder="What this alias does">
+                </div>
+                <div class="form-actions">
+                    <button class="term-btn" onclick="saveAlias()">[ SAVE ]</button>
+                    <button class="term-btn muted-btn" onclick="closeModal('aliasModal')">[ CANCEL ]</button>
+                </div>
+                <div id="aliasStatus" style="margin-top:8px"></div>
+            </div>
+        </div>
+    </div>
+
 </section>
 
 <!-- ── LOGS PAGE ── -->
@@ -695,7 +760,7 @@
  <div class="stats-grid">
  <div class="stat-card">
  <div class="stat-label">$ VERSION</div>
- <div class="stat-value">v1.2.1b1</div>
+ <div class="stat-value">v1.3.0b1</div>
  </div>
  <div class="stat-card">
  <div class="stat-label">$ PORT</div>

@@ -502,6 +502,122 @@ function toggleTheme() {
 }
 
 
+
+
+// ─── Public Model Aliases ───
+let _editingAlias = null;
+
+async function loadAliases() {
+    try {
+        const aliases = await api('/api/aliases');
+        const tbody = document.getElementById('aliasesBody');
+        if (!aliases.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="muted">No aliases yet. Click [+ NEW ALIAS] to create one — they appear in /v1/models as first-class names.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = aliases.map(a => `
+            <tr>
+                <td class="text-cyan"><code>${escapeHtml(a.name)}</code></td>
+                <td>${escapeHtml(a.tier)}</td>
+                <td>${escapeHtml(a.display_name || a.name)}</td>
+                <td class="muted">${escapeHtml(a.description || '—')}</td>
+                <td>
+                    <button class="term-btn-sm" onclick="editAlias('${escapeAttr(a.name)}')">[EDIT]</button>
+                    <button class="term-btn-sm btn-danger" onclick="deleteAlias('${escapeAttr(a.name)}')">[DEL]</button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (e) {
+        console.error('Aliases load failed:', e);
+        const tb = document.getElementById('aliasesBody');
+        if (tb) tb.innerHTML = '<tr><td colspan="5" class="text-red">Failed to load: ' + escapeHtml(e.message || e) + '</td></tr>';
+    }
+}
+
+async function _populateAliasTierDropdown(currentTier) {
+    const sel = document.getElementById('aliasTier');
+    if (!sel) return;
+    try {
+        const tiers = await api('/api/tiers');
+        const names = Object.keys(tiers);
+        sel.innerHTML = '<option value="">-- select tier --</option>' +
+            names.map(n => `<option value="${escapeHtml(n)}"${n === currentTier ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('');
+    } catch (e) {
+        sel.innerHTML = '<option value="">(failed to load tiers)</option>';
+    }
+}
+
+async function showCreateAlias() {
+    _editingAlias = null;
+    document.getElementById('aliasModalTitle').textContent = 'NEW ALIAS';
+    document.getElementById('aliasName').value = '';
+    document.getElementById('aliasName').disabled = false;
+    document.getElementById('aliasDisplay').value = '';
+    document.getElementById('aliasOwnedBy').value = '';
+    document.getElementById('aliasDescription').value = '';
+    document.getElementById('aliasStatus').textContent = '';
+    await _populateAliasTierDropdown('');
+    document.getElementById('aliasModal').style.display = 'flex';
+}
+
+async function editAlias(name) {
+    try {
+        const aliases = await api('/api/aliases');
+        const a = aliases.find(x => x.name === name);
+        if (!a) return alert('Alias not found');
+        _editingAlias = name;
+        document.getElementById('aliasModalTitle').textContent = `EDIT ALIAS — ${name}`;
+        document.getElementById('aliasName').value = a.name;
+        document.getElementById('aliasName').disabled = false;
+        document.getElementById('aliasDisplay').value = a.display_name || '';
+        document.getElementById('aliasOwnedBy').value = a.owned_by || '';
+        document.getElementById('aliasDescription').value = a.description || '';
+        document.getElementById('aliasStatus').textContent = '';
+        await _populateAliasTierDropdown(a.tier);
+        document.getElementById('aliasModal').style.display = 'flex';
+    } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function saveAlias() {
+    const name = document.getElementById('aliasName').value.trim();
+    const tier = document.getElementById('aliasTier').value;
+    const status = document.getElementById('aliasStatus');
+    if (!name) { status.innerHTML = '<span class="text-red">> name is required</span>'; return; }
+    if (!tier) { status.innerHTML = '<span class="text-red">> target tier is required</span>'; return; }
+    const body = {
+        tier,
+        display_name: document.getElementById('aliasDisplay').value.trim(),
+        owned_by: document.getElementById('aliasOwnedBy').value.trim() || 'fllmingo',
+        description: document.getElementById('aliasDescription').value.trim(),
+    };
+    try {
+        if (_editingAlias) {
+            // If name changed, send rename field
+            if (name !== _editingAlias) body.rename = name;
+            await api(`/api/aliases/${encodeURIComponent(_editingAlias)}`, {
+                method: 'PUT',
+                body: JSON.stringify(body),
+            });
+        } else {
+            body.name = name;
+            await api('/api/aliases', { method: 'POST', body: JSON.stringify(body) });
+        }
+        closeModal('aliasModal');
+        loadAliases();
+    } catch (e) {
+        status.innerHTML = '<span class="text-red">> ' + escapeHtml(e.message) + '</span>';
+    }
+}
+
+async function deleteAlias(name) {
+    if (!confirm(`Delete alias "${name}"? Clients calling this name will start getting 404s.`)) return;
+    try {
+        await api(`/api/aliases/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        loadAliases();
+    } catch (e) { alert('Failed: ' + e.message); }
+}
+
+
 // ─── Init ───
 function initApp() {
     initTheme();
@@ -560,7 +676,7 @@ function switchPage(page) {
  switch (page) {
  case 'status': loadStatus(); loadUsage(); rehydrateLiveFeed(); break;
  case 'providers': loadProviders(); break;
- case 'tiers': loadTiers(); break;
+ case 'tiers': loadTiers(); loadAliases(); break;
  case 'logs': loadLogs(); break;
  case 'catalog': loadCatalog(); break;
  case 'leaderboard': loadLeaderboard(); break;

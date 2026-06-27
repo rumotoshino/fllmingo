@@ -3,6 +3,18 @@
 All notable changes to FLLMingo are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0b1] — 2026-06-27 (beta)
+
+### Added
+
+- **Public model aliases** — define rich, client-facing model names that route to tiers under the hood. Clients see `GPT5`, `fast-claude`, or any name you pick instead of internal tier names like `standard` or `complex`. Aliases now appear as first-class entries in `/v1/models` with custom `display_name`, `owned_by`, and `description` fields. Perfect for harness/SDK selection where the public model name matters.
+- **Aliases tab on Tiers page** — full CRUD UI (create, edit, rename, delete) with tier dropdown and live `/v1/models` integration.
+- New endpoints: `GET /api/aliases`, `POST /api/aliases`, `PUT /api/aliases/{name}`, `DELETE /api/aliases/{name}`.
+
+### Changed
+
+- `resolve_tier()` now accepts both legacy string aliases (`{auto: standard}`) and rich dict aliases (`{GPT5: {tier: complex, display_name: "GPT-5", ...}}`). Backward compatible — existing configs keep working.
+
 ## [1.2.1b1] — 2026-06-27 (beta)
 
 Bugfix-only release. Squashes silent failures in request logging and the live dashboard.

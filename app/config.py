@@ -102,7 +102,11 @@ def get_tier_config(tier_name: str) -> dict[str, Any] | None:
 
 def resolve_tier(model_field: str) -> tuple[str, dict[str, Any]] | None:
     """Resolve a model string to (tier_name, tier_config).
-    
+
+    Supports two alias shapes:
+      - legacy: aliases[name] = "tier_name"  (plain string redirect)
+      - rich:   aliases[name] = {tier, display_name, description, owned_by}
+
     If model_field is a tier name or alias, return the resolved tier.
     If it's a passthrough model name, return None.
     """
@@ -110,9 +114,21 @@ def resolve_tier(model_field: str) -> tuple[str, dict[str, Any]] | None:
     aliases = cfg.get("routing", {}).get("aliases", {})
     tiers = cfg.get("tiers", {})
 
-    resolved = aliases.get(model_field, model_field)
-    if resolved in tiers:
-        return resolved, tiers[resolved]
+    alias_entry = aliases.get(model_field)
+    if alias_entry is None:
+        # No alias match — model_field might be a tier name directly
+        if model_field in tiers:
+            return model_field, tiers[model_field]
+        return None
+
+    # Rich alias (dict) — pull tier out of the object
+    if isinstance(alias_entry, dict):
+        target = alias_entry.get("tier", "")
+    else:
+        target = str(alias_entry)
+
+    if target in tiers:
+        return target, tiers[target]
     return None
 
 
