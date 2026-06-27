@@ -1550,8 +1550,14 @@ async def _broadcast_ws(event_type: str, data: Any):
 async def dashboard():
     index = STATIC_DIR / "index.html"
     if index.exists():
-        return FileResponse(index)
-    return HTMLResponse("<h1>LLM Router</h1><p>Static files not found</p>")
+        html = index.read_text()
+        # Inject version as cache-busting query param so browsers fetch fresh assets on every deploy
+        import re
+        ver = app.version
+        html = re.sub(r'style\.css(\?v=[^"]*)?', f'style.css?v={ver}', html)
+        html = re.sub(r'app\.js(\?v=[^"]*)?', f'app.js?v={ver}', html)
+        return HTMLResponse(html)
+    return HTMLResponse("<h1>FLLMingo</h1><p>Static files not found</p>")
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
