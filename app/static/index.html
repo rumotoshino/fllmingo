@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#f4f4f6">
+    <title>FLLMingo — FLLMingo</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <script>
+(function() {
+    try {
+        var t = localStorage.getItem('fllmingo-theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+    } catch (_) {}
+})();
+</script>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+
+<!-- ═══ First-Time Password Change ═══ -->
+<div class="login-overlay" id="firstRunOverlay" style="display:none">
+ <div class="login-box">
+ <div class="login-header">
+ <span class="login-prompt">$</span>
+ <span class="login-title">first-run</span>
+ <span class="login-cursor">_</span>
+ </div>
+ <div class="login-subtitle muted">// security check required</div>
+ <div class="login-subtitle text-amber" style="margin:8px 0">⚠ Default token detected — change it now</div>
+ <div class="login-form">
+ <input type="password" id="firstRunNew" class="login-input" placeholder="new password (min 6 chars)..." autocomplete="new-password" spellcheck="false" />
+ <input type="password" id="firstRunConfirm" class="login-input" placeholder="confirm password..." autocomplete="new-password" spellcheck="false" />
+ <button class="login-btn" onclick="handleFirstRun()">[ SET PASSWORD ]</button>
+ <div class="login-error" id="firstRunError"></div>
+ </div>
+ </div>
+</div>
+
+<!-- ═══ Login Overlay ═══ -->
+<div class="login-overlay" id="loginOverlay">
+ <div class="login-box">
+ <div class="login-header">
+ <span class="login-prompt">$</span>
+ <span class="login-title">fllmingo</span>
+ <span class="login-cursor">_</span>
+ </div>
+ <div class="login-subtitle muted">// authentication required</div>
+ <div class="login-form" id="loginForm">
+ <input
+ type="password"
+ id="loginToken"
+ class="login-input"
+ placeholder="enter dashboard token..."
+ autocomplete="current-password"
+ spellcheck="false"
+ />
+ <label class="login-remember">
+ <input type="checkbox" id="loginRemember" />
+ <span>keep me signed in</span>
+ </label>
+ <button class="login-btn" onclick="handleLogin()">[ AUTHENTICATE ]</button>
+ <div class="login-error" id="loginError"></div>
+ </div>
+ <div class="login-footer muted">// session = per-tab · remember = persistent</div>
+ </div>
+</div>
+
+<div id="app" style="display:none">
+
+<!-- ═══ Top Bar ═══ -->
+<header class="topbar">
+    <div class="logo">
+        <span class="logo-bracket">[</span>
+        <span class="logo-text">fllmingo</span>
+        <span class="logo-bracket">]</span>
+        <span class="logo-version">1.0.0</span>
+    </div>
+    <div class="system-status" id="sysStatus">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">◑</button>
+        <button class="theme-toggle" onclick="logout()" title="Log out" style="font-size:14px">⏻</button>
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">CONNECTING...</span>
+    </div>
+</header>
+
+<!-- ═══ Nav ═══ -->
+<nav class="nav-tabs" id="navTabs">
+    <button class="nav-tab active" data-page="status">[STATUS]</button>
+    <button class="nav-tab" data-page="providers">[PROVIDERS]</button>
+    <button class="nav-tab" data-page="tiers">[TIERS]</button>
+    <button class="nav-tab" data-page="catalog">[CATALOG]</button>
+    <div class="nav-more-wrap">
+        <button class="nav-tab nav-more-btn" onclick="toggleNavMenu()" title="More">≡</button>
+        <div class="nav-more-menu" id="navMoreMenu" style="display:none">
+            <button class="nav-tab" data-page="settings">[⚙ SETTINGS]</button>
+            <button class="nav-tab" data-page="logs">[LOGS]</button>
+            <button class="nav-tab" data-page="inspect">[INSPECT]</button>
+            <button class="nav-tab" data-page="leaderboard">[LEADERBOARD]</button>
+            <button class="nav-tab" data-page="config">[CONFIG]</button>
+        </div>
+    </div>
+</nav>
+
+<!-- ═══ Pages ═══ -->
+<main class="content">
+
+<!-- ── STATUS PAGE ── -->
+<section class="page active" id="page-status">
+ <div class="stats-grid">
+ <div class="stat-card">
+ <div class="stat-label">$ REQUESTS</div>
+ <div class="stat-value" id="statRequests">--</div>
+ </div>
+ <div class="stat-card">
+ <div class="stat-label">$ COST</div>
+ <div class="stat-value" id="statCost">--</div>
+ </div>
+ <div class="stat-card">
+ <div class="stat-label">$ ERROR RATE</div>
+ <div class="stat-value" id="statErrors">--</div>
+ </div>
+ <div class="stat-card">
+ <div class="stat-label">$ TOKENS</div>
+ <div class="stat-value" id="statTokens">--</div>
+ </div>
+ </div>
+
+ <div class="panel">
+ <div class="panel-header">USAGE SUMMARY
+ <select class="term-select" style="max-width:200px" onchange="setUsagePeriod(this.value)">
+ <option value="today">Today</option>
+ <option value="7d" selected>Last 7 Days</option>
+ <option value="30d">Last 30 Days</option>
+ <option value="all">All Time</option>
+ </select>
+ </div>
+ <div class="stats-grid">
+ <div class="stat-card">
+ <div class="stat-label">$ TOTAL TOKENS</div>
+ <div class="stat-value" id="usageTokens">--</div>
+ </div>
+ <div class="stat-card">
+ <div class="stat-label">$ PROMPT TOKENS</div>
+ <div class="stat-value" id="usagePrompt">--</div>
+ </div>
+ <div class="stat-card">
+ <div class="stat-label">$ COMPLETION TOKENS</div>
+ <div class="stat-value" id="usageCompletion">--</div>
+ </div>
+
+ </div>
+ </div>
+
+    <div class="panel">
+        <div class="panel-header">PROVIDER HEALTH</div>
+        <div class="table-wrap">
+            <table class="term-table" id="healthTable">
+                <thead>
+                    <tr>
+                        <th>PROVIDER</th>
+                        <th>STATUS</th>
+                        <th>REQUESTS</th>
+                        <th>FAILURES</th>
+                        <th>LAST ERROR</th>
+                    </tr>
+                </thead>
+                <tbody id="healthBody">
+                    <tr><td colspan="5" class="muted">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">LIVE ACTIVITY
+            <span class="live-badge" id="liveBadge">● LIVE</span>
+        </div>
+        <div class="log-stream" id="liveStream">
+            <div class="log-line muted">$ awaiting data...</div>
+        </div>
+    </div>
+</section>
+
+<!-- ── PROVIDERS PAGE ── -->
+<section class="page" id="page-providers">
+    <div class="panel">
+        <div class="panel-header">CONFIGURED PROVIDERS
+            <button class="term-btn-sm" onclick="showAddProvider()">[+ ADD PROVIDER]</button>
+        </div>
+        <div id="providersList"></div>
+    </div>
+
+    <!-- Add/Edit Provider Modal -->
+    <div class="modal-overlay" id="providerModal" style="display:none">
+        <div class="modal-panel">
+            <div class="panel-header">
+                <span id="providerModalTitle">ADD PROVIDER</span>
+                <button class="term-btn-sm" onclick="closeProviderModal()">[X]</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label>NAME</label>
+                    <input type="text" id="provName" class="term-input full" placeholder="e.g. openrouter">
+                </div>
+                <div class="form-row">
+                    <label>ENDPOINT</label>
+                    <input type="text" id="provEndpoint" class="term-input full" placeholder="https://api.example.com/v1">
+                </div>
+                <div class="form-row">
+                    <label>API KEY</label>
+                    <input type="password" id="provKey" class="term-input full" placeholder="sk-... (stored in .env)">
+                </div>
+                <div class="form-row-inline">
+                    <div>
+                        <label>TYPE</label>
+                        <select id="provType" class="term-select">
+                            <option value="openai">openai</option>
+                            <option value="anthropic">anthropic</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>TIMEOUT (s)</label>
+                        <input type="number" id="provTimeout" class="term-input" value="60" min="5" max="600">
+                    </div>
+                    <div>
+                        <label>MAX RETRIES</label>
+                        <input type="number" id="provRetries" class="term-input" value="2" min="0" max="10">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button class="term-btn" id="providerSaveBtn" onclick="saveProvider()">[SAVE]</button>
+                    <button class="term-btn muted-btn" onclick="closeProviderModal()">[CANCEL]</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ── TIERS PAGE ── -->
+<section class="page" id="page-tiers">
+    <div class="panel">
+        <div class="panel-header">TIER MANAGEMENT
+            <button class="term-btn-sm" onclick="showAddTierModal()">[+ NEW TIER]</button>
+        </div>
+        <div id="tiersContainer">
+            <div class="muted" style="padding:16px">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Add model modal -->
+    <div class="modal-overlay" id="addModelModal" style="display:none">
+        <div class="modal-box">
+            <div class="panel-header">ADD MODEL TO <span id="addModelTierName"></span>
+                <button class="term-btn-sm" onclick="closeModal('addModelModal')">[X]</button>
+            </div>
+            <div style="padding:12px">
+                <label class="muted" style="font-size:11px">PROVIDER</label>
+                <select id="addModelProvider" class="term-select" onchange="filterModelsByProvider()">
+                    <option value="">-- select --</option>
+                </select>
+                <label class="muted" style="font-size:11px;margin-top:8px;display:block">MODEL</label>
+                <select id="addModelSelect" class="term-select">
+                    <option value="">-- select provider first --</option>
+                </select>
+                <button class="term-btn" style="margin-top:12px;width:100%" onclick="addModelToTier()">[ADD]</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New tier modal -->
+    <div class="modal-overlay" id="addTierModal" style="display:none">
+        <div class="modal-box">
+            <div class="panel-header">CREATE NEW TIER
+                <button class="term-btn-sm" onclick="closeModal('addTierModal')">[X]</button>
+            </div>
+            <div style="padding:12px">
+                <label class="muted" style="font-size:11px">TIER NAME</label>
+                <input type="text" id="newTierName" class="term-input" style="max-width:100%;margin-bottom:12px" placeholder="e.g. ultra">
+                <button class="term-btn" style="width:100%" onclick="createTier()">[CREATE]</button>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ── LOGS PAGE ── -->
+<section class="page" id="page-logs">
+    <div class="panel">
+        <div class="panel-header">REQUEST LOG — <span class="muted">click row to inspect</span></div>
+        <div class="table-wrap">
+            <table class="term-table" id="logsTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>TIME</th>
+                        <th>MODEL</th>
+                        <th>PROVIDER</th>
+                        <th>STATUS</th>
+                        <th>LATENCY</th>
+                        <th>COST</th>
+                        <th>RETRY</th>
+                    </tr>
+                </thead>
+                <tbody id="logsBody">
+                    <tr><td colspan="8" class="muted">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<!-- ── INSPECT PAGE ── -->
+<section class="page" id="page-inspect">
+    <div class="panel">
+        <div class="panel-header">PAYLOAD INSPECTOR</div>
+        <div class="inspect-controls">
+            <input type="number" id="inspectId" placeholder="request ID..." class="term-input">
+            <button class="term-btn" onclick="loadInspect()">[EXECUTE]</button>
+        </div>
+        <div id="inspectContent" class="muted">$ enter a request ID to inspect</div>
+    </div>
+</section>
+
+<!-- ── CATALOG PAGE ── -->
+<section class="page" id="page-catalog">
+ <div class="panel">
+ <div class="panel-header">MODEL CATALOG
+ <button class="term-btn-sm" onclick="refreshCatalog()">[⟳ REFRESH]</button>
+ </div>
+ <div class="inspect-controls">
+ <input type="text" id="catalogSearch" placeholder="filter models..." class="term-input" oninput="filterCatalog()" style="max-width:260px">
+ <select id="catalogProviderFilter" class="term-select" onchange="filterCatalog()" style="max-width:220px">
+ <option value="">All Providers</option>
+ </select>
+ <select id="catalogSort" class="term-select" onchange="filterCatalog()" style="max-width:160px">
+ <option value="az">Sort: A-Z</option>
+ <option value="za">Sort: Z-A</option>
+ </select>
+ <select id="catalogPageSize" class="term-select" onchange="changeCatalogPageSize()" style="max-width:140px">
+ <option value="25">25 / page</option>
+ <option value="50" selected>50 / page</option>
+ <option value="100">100 / page</option>
+ <option value="all">Show all</option>
+ </select>
+ </div>
+ <div class="table-wrap">
+ <table class="term-table" id="catalogTable">
+ <thead>
+ <tr>
+ <th>MODEL</th>
+ <th>PROVIDER</th>
+ <th>CONTEXT</th>
+ <th>MAX OUTPUT</th>
+ <th>INPUT $</th>
+ <th>OUTPUT $</th>
+ <th>IN TIER?</th>
+ </tr>
+ </thead>
+ <tbody id="catalogBody">
+ <tr><td colspan="7" class="muted">Click refresh to load...</td></tr>
+ </tbody>
+ </table>
+ </div>
+ <div id="catalogPagination" class="catalog-pagination" style="display:none">
+ <button class="term-btn-sm" onclick="catalogPrevPage()" id="catalogPrev">[« PREV]</button>
+ <span class="muted" id="catalogPageInfo">Page 1 / 1</span>
+ <button class="term-btn-sm" onclick="catalogNextPage()" id="catalogNext">[NEXT »]</button>
+ </div>
+ </div>
+</section>
+
+<!-- ── LEADERBOARD PAGE ── -->
+<section class="page" id="page-leaderboard">
+ <div class="panel">
+ <div class="panel-header">MODEL LEADERBOARD
+ <select id="leaderboardSort" class="term-select" onchange="loadLeaderboard()" style="max-width:180px">
+ <option value="requests" selected>Sort: Requests</option>
+ <option value="total_tokens">Sort: Tokens</option>
+ <option value="cost">Sort: Cost</option>
+ </select>
+ <select id="leaderboardPeriod" class="term-select" onchange="loadLeaderboard()" style="max-width:160px; margin-left:8px;">
+ <option value="today">Today</option>
+ <option value="7d" selected>Last 7 Days</option>
+ <option value="30d">Last 30 Days</option>
+ <option value="all">All Time</option>
+ </select>
+ </div>
+ <div class="table-wrap">
+ <table class="term-table" id="leaderboardTable">
+ <thead>
+ <tr>
+ <th>#</th>
+ <th>MODEL</th>
+ <th>PROVIDER</th>
+ <th>REQUESTS</th>
+ <th>PROMPT TOKENS</th>
+ <th>COMPLETION TOKENS</th>
+ <th>TOTAL TOKENS</th>
+ </tr>
+ </thead>
+ <tbody id="leaderboardBody">
+ <tr><td colspan="7" class="muted">Loading...</td></tr>
+ </tbody>
+ </table>
+ </div>
+ </div>
+</section>
+
+
+
+<!-- ── CONFIG PAGE ── -->
+<section class="page" id="page-config">
+    <div class="panel">
+        <div class="panel-header">CONFIG.YAML
+            <button class="term-btn-sm" onclick="saveConfig()">[SAVE & RELOAD]</button>
+        </div>
+        <textarea class="config-editor" id="configEditor" spellcheck="false"></textarea>
+        <div id="configStatus" class="muted"></div>
+    </div>
+</section>
+
+
+<!-- ── SETTINGS PAGE ── -->
+<section class="page" id="page-settings">
+ <div class="panel" style="max-width:600px;margin-top:16px">
+ <div class="panel-header">🎨 THEME</div>
+ <div style="padding:16px">
+ <div class="theme-grid" id="themeGrid">
+ <div class="theme-card" data-theme-val="dark" onclick="selectTheme('dark')">
+ <div class="theme-preview"><span style="background:#05050a"></span><span style="background:#00ff88"></span><span style="background:#0c0c14"></span></div>
+ <div class="theme-name">Dark</div>
+ </div>
+ <div class="theme-card" data-theme-val="light" onclick="selectTheme('light')">
+ <div class="theme-preview"><span style="background:#f4f4f6"></span><span style="background:#00aa5a"></span><span style="background:#ffffff"></span></div>
+ <div class="theme-name">Light</div>
+ </div>
+ <div class="theme-card" data-theme-val="vscode" onclick="selectTheme('vscode')">
+ <div class="theme-preview"><span style="background:#1e1e1e"></span><span style="background:#4ec9b0"></span><span style="background:#252526"></span></div>
+ <div class="theme-name">VSCode</div>
+ </div>
+ <div class="theme-card" data-theme-val="amoled" onclick="selectTheme('amoled')">
+ <div class="theme-preview"><span style="background:#000"></span><span style="background:#ff0099"></span><span style="background:#0a0a0a"></span></div>
+ <div class="theme-name">AMOLED</div>
+ </div>
+ <div class="theme-card" data-theme-val="solarized" onclick="selectTheme('solarized')">
+ <div class="theme-preview"><span style="background:#002b36"></span><span style="background:#b58900"></span><span style="background:#073642"></span></div>
+ <div class="theme-name">Solarized</div>
+ </div>
+ <div class="theme-card" data-theme-val="nord" onclick="selectTheme('nord')">
+ <div class="theme-preview"><span style="background:#2e3440"></span><span style="background:#88c0d0"></span><span style="background:#3b4252"></span></div>
+ <div class="theme-name">Nord</div>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <!-- API KEYS (within settings) -->
+ <div class="panel" style="max-width:800px;margin-top:16px">
+ <div class="panel-header">🔑 API KEYS
+ <button class="term-btn-sm" onclick="showGenerateKeyModal()">[+ GENERATE KEY]</button>
+ </div>
+ <div class="table-wrap">
+ <table class="term-table" id="keysTable">
+ <thead>
+ <tr>
+ <th>NAME</th>
+ <th>KEY</th>
+ <th>SCOPES</th>
+ <th>EXPIRES</th>
+ <th>QUOTA</th>
+ <th>USAGE</th>
+ <th>STATUS</th>
+ <th>ACTIONS</th>
+ </tr>
+ </thead>
+ <tbody id="keysBody">
+ <tr><td colspan="8" class="muted">Loading...</td></tr>
+ </tbody>
+ </table>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:600px">
+ <div class="panel-header">CHANGE PASSWORD</div>
+ <div style="padding:16px">
+ <div class="form-row">
+ <label>CURRENT PASSWORD</label>
+ <input type="password" id="settingsCurrent" class="term-input full" placeholder="enter current token..." autocomplete="current-password" />
+ </div>
+ <div class="form-row">
+ <label>NEW PASSWORD</label>
+ <input type="password" id="settingsNew" class="term-input full" placeholder="new password (min 6 chars)..." autocomplete="new-password" />
+ </div>
+ <div class="form-row">
+ <label>CONFIRM</label>
+ <input type="password" id="settingsConfirm" class="term-input full" placeholder="repeat new password..." autocomplete="new-password" />
+ </div>
+ <div class="form-actions">
+ <button class="term-btn" onclick="changePassword()">[ UPDATE ]</button>
+ </div>
+ <div id="passwordStatus" style="margin-top:12px"></div>
+ </div>
+ </div>
+
+
+ <div class="panel" style="max-width:600px;margin-top:16px">
+ <div class="panel-header">RATE LIMITING</div>
+ <div style="padding:16px">
+ <div class="form-row">
+ <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+ <input type="checkbox" id="rateLimitEnabled" />
+ <span>Enable rate limiting on /v1/* endpoints</span>
+ </label>
+ </div>
+ <div class="form-row-inline">
+ <div>
+ <label>REQUESTS PER MINUTE</label>
+ <input type="number" id="rateLimitRpm" class="term-input" value="60" min="1" max="10000" />
+ </div>
+ <div>
+ <label>LIMIT BY</label>
+ <select id="rateLimitPer" class="term-select">
+ <option value="ip">IP Address</option>
+ <option value="api_key">API Key</option>
+ </select>
+ </div>
+ </div>
+ <div class="form-actions">
+ <button class="term-btn" onclick="saveRateLimit()">[ SAVE ]</button>
+ </div>
+ <div id="rateLimitStatus" style="margin-top:8px"></div>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:600px;margin-top:16px">
+ <div class="panel-header">WEBHOOK ALERTS</div>
+ <div style="padding:16px">
+ <div class="form-row">
+ <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+ <input type="checkbox" id="webhookEnabled" />
+ <span>Enable webhook alerts</span>
+ </label>
+ </div>
+ <div class="form-row">
+ <label>TYPE</label>
+ <select id="webhookType" class="term-select full">
+ <option value="discord">Discord</option>
+ <option value="slack">Slack</option>
+ <option value="custom">Custom (raw JSON)</option>
+ </select>
+ </div>
+ <div class="form-row">
+ <label>WEBHOOK URL</label>
+ <input type="password" id="webhookUrl" class="term-input full" placeholder="https://discord.com/api/webhooks/..." />
+ <div class="muted" style="font-size:11px;margin-top:4px" id="webhookUrlHint"></div>
+ </div>
+ <div class="form-actions">
+ <button class="term-btn" onclick="saveWebhook()">[ SAVE ]</button>
+ <button class="term-btn muted-btn" onclick="testWebhook()">[ SEND TEST ]</button>
+ </div>
+ <div id="webhookStatus" style="margin-top:8px"></div>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:600px;margin-top:16px">
+ <div class="panel-header">💰 COST BUDGETS</div>
+ <div style="padding:16px">
+ <div class="form-row">
+ <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+ <input type="checkbox" id="budgetEnabled" />
+ <span>Enable cost budgets</span>
+ </label>
+ </div>
+ <div class="form-row-inline">
+ <div>
+ <label>DAILY LIMIT ($)</label>
+ <input type="number" id="budgetDaily" class="term-input" value="0" min="0" step="0.5" />
+ </div>
+ <div>
+ <label>MONTHLY LIMIT ($)</label>
+ <input type="number" id="budgetMonthly" class="term-input" value="0" min="0" step="10" />
+ </div>
+ <div>
+ <label>ALERT AT (%)</label>
+ <input type="number" id="budgetAlertAt" class="term-input" value="80" min="1" max="100" />
+ </div>
+ </div>
+ <div class="form-row">
+ <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+ <input type="checkbox" id="budgetAutoPause" />
+ <span>Auto-pause requests when limit hit</span>
+ </label>
+ </div>
+ <div class="form-actions">
+ <button class="term-btn" onclick="saveBudget()">[ SAVE ]</button>
+ </div>
+ <div id="budgetStatus" style="margin-top:8px"></div>
+ <div id="budgetUsage" style="margin-top:12px"></div>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:600px;margin-top:16px">
+ <div class="panel-header">🏥 HEALTH PROBES</div>
+ <div style="padding:16px">
+ <div class="form-row">
+ <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+ <input type="checkbox" id="probeEnabled" />
+ <span>Enable background health probes</span>
+ </label>
+ </div>
+ <div class="form-row">
+ <label>INTERVAL (SECONDS)</label>
+ <input type="number" id="probeInterval" class="term-input" value="300" min="60" max="3600" />
+ </div>
+ <div class="form-actions">
+ <button class="term-btn" onclick="saveHealthProbe()">[ SAVE ]</button>
+ </div>
+ <div id="probeStatus" style="margin-top:8px"></div>
+ <div class="muted" style="margin-top:8px;font-size:11px">Pings each provider periodically to detect outages before users hit them.</div>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:600px;margin-top:16px">
+ <div class="panel-header">💾 BACKUP / RESTORE</div>
+ <div style="padding:16px">
+ <p class="muted" style="font-size:12px;margin-bottom:12px">Export your full config (providers, tiers, keys, settings) as JSON.</p>
+ <div class="form-actions">
+ <button class="term-btn" onclick="downloadBackup()">[ DOWNLOAD BACKUP ]</button>
+ <button class="term-btn muted-btn" onclick="document.getElementById('restoreFile').click()">[ RESTORE FROM FILE ]</button>
+ <input type="file" id="restoreFile" accept=".json,.yaml,.yml" style="display:none" onchange="restoreBackup(event)" />
+ </div>
+ <div id="backupStatus" style="margin-top:8px"></div>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:600px;margin-top:16px">
+ <div class="panel-header">📤 EXPORT LOGS</div>
+ <div style="padding:16px">
+ <div class="form-row-inline">
+ <div>
+ <label>FORMAT</label>
+ <select id="exportFormat" class="term-select">
+ <option value="json">JSON</option>
+ <option value="csv">CSV</option>
+ </select>
+ </div>
+ <div>
+ <label>DAYS</label>
+ <input type="number" id="exportDays" class="term-input" value="7" min="1" max="365" />
+ </div>
+ </div>
+ <div class="form-actions">
+ <button class="term-btn" onclick="exportLogs()">[ DOWNLOAD ]</button>
+ </div>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:800px;margin-top:16px">
+ <div class="panel-header">⚡ LATENCY STATS
+ <select id="latencyPeriod" class="term-select" style="max-width:120px" onchange="loadLatency()">
+ <option value="today">Today</option>
+ <option value="7d" selected>7 Days</option>
+ <option value="30d">30 Days</option>
+ <option value="all">All Time</option>
+ </select>
+ </div>
+ <div class="table-wrap">
+ <table class="term-table">
+ <thead>
+ <tr><th>PROVIDER</th><th>COUNT</th><th>P50</th><th>P95</th><th>P99</th><th>AVG</th></tr>
+ </thead>
+ <tbody id="latencyBody"><tr><td colspan="6" class="muted">No data yet</td></tr></tbody>
+ </table>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:800px;margin-top:16px">
+ <div class="panel-header">📝 PROMPT TEMPLATES
+ <button class="term-btn-sm" onclick="showCreateTemplate()">[+ NEW TEMPLATE]</button>
+ </div>
+ <div class="table-wrap">
+ <table class="term-table">
+ <thead><tr><th>NAME</th><th>DESCRIPTION</th><th>MODEL</th><th>ACTIONS</th></tr></thead>
+ <tbody id="templatesBody"><tr><td colspan="4" class="muted">No templates yet</td></tr></tbody>
+ </table>
+ </div>
+ </div>
+
+ <div class="panel" style="max-width:600px;margin-top:16px">
+ <div class="panel-header">SYSTEM INFO</div>
+ <div style="padding:16px">
+ <div class="stats-grid">
+ <div class="stat-card">
+ <div class="stat-label">$ VERSION</div>
+ <div class="stat-value">v1.2.0</div>
+ </div>
+ <div class="stat-card">
+ <div class="stat-label">$ PORT</div>
+ <div class="stat-value">8100</div>
+ </div>
+ </div>
+ </div>
+ </div>
+</section>
+
+
+<!-- Template Create/Edit Modal -->
+<div class="modal-overlay" id="templateModal" style="display:none">
+ <div class="modal-panel">
+ <div class="panel-header">
+ <span id="templateModalTitle">NEW TEMPLATE</span>
+ <button class="term-btn-sm" onclick="closeModal('templateModal')">[X]</button>
+ </div>
+ <div class="modal-body">
+ <div class="form-row">
+ <label>NAME</label>
+ <input type="text" id="tplName" class="term-input full" placeholder="e.g. code-review" />
+ </div>
+ <div class="form-row">
+ <label>DESCRIPTION</label>
+ <input type="text" id="tplDesc" class="term-input full" placeholder="What is this template for?" />
+ </div>
+ <div class="form-row">
+ <label>SYSTEM PROMPT</label>
+ <textarea id="tplSystem" class="term-input full" rows="6" placeholder="You are a helpful..."></textarea>
+ </div>
+ <div class="form-row-inline">
+ <div>
+ <label>MODEL/TIER</label>
+ <input type="text" id="tplModel" class="term-input" placeholder="standard, complex, or model id" />
+ </div>
+ <div>
+ <label>TEMPERATURE</label>
+ <input type="number" id="tplTemp" class="term-input" step="0.1" min="0" max="2" placeholder="0.7" />
+ </div>
+ <div>
+ <label>MAX TOKENS</label>
+ <input type="number" id="tplMaxTokens" class="term-input" placeholder="4096" />
+ </div>
+ </div>
+ <div class="form-actions">
+ <button class="term-btn" onclick="saveTemplate()">[ SAVE ]</button>
+ <button class="term-btn muted-btn" onclick="closeModal('templateModal')">[ CANCEL ]</button>
+ </div>
+ </div>
+ </div>
+</div>
+</main>
+
+<!-- ═══ Bottom Nav (mobile) ═══ -->
+<nav class="bottom-nav" id="bottomNav">
+    <button class="bn-tab active" data-page="status">STATUS</button>
+    <button class="bn-tab" data-page="providers">PROV</button>
+    <button class="bn-tab" data-page="tiers">TIERS</button>
+    <button class="bn-tab" data-page="logs">LOGS</button>
+    <button class="bn-tab" data-page="catalog">CAT</button>
+    <button class="bn-tab" data-page="settings">SET</button>
+    <button class="bn-tab" data-page="inspect">INSP</button>
+    <button class="bn-tab" data-page="config">CFG</button>
+</nav>
+
+</div><!-- /#app -->
+
+<script src="/static/app.js"></script>
+
+<!-- Generate Key Modal (top-level for proper z-index) -->
+<div class="modal-overlay" id="generateKeyModal" style="display:none">
+ <div class="modal-box" style="max-width:500px">
+ <div class="panel-header">GENERATE NEW API KEY
+ <button class="term-btn-sm" onclick="closeModal('generateKeyModal')">[X]</button>
+ </div>
+ <div style="padding:16px">
+ <div class="form-row">
+ <label>NAME</label>
+ <input type="text" id="newKeyName" class="term-input full" placeholder="e.g. Mobile App">
+ </div>
+ <div class="form-row-inline">
+ <div>
+ <label>EXPIRES (optional)</label>
+ <input type="date" id="newKeyExpiry" class="term-input" style="max-width:100%">
+ </div>
+ <div>
+ <label>QUOTA (requests)</label>
+ <input type="number" id="newKeyQuota" class="term-input" placeholder="unlimited" min="1" style="max-width:100%">
+ </div>
+ <div>
+ <label>QUOTA PERIOD</label>
+ <select id="newKeyPeriod" class="term-select">
+ <option value="">No limit</option>
+ <option value="day">Per Day</option>
+ <option value="week">Per Week</option>
+ <option value="month">Per Month</option>
+ </select>
+ </div>
+ </div>
+ <div class="form-row">
+ <label>ALLOWED TIERS <span class="muted" style="font-size:10px">(empty = all tiers)</span></label>
+ <div id="newKeyTiersWrap" class="tier-checkbox-grid">
+ <span class="muted">Loading tiers...</span>
+ </div>
+ </div>
+ <button class="term-btn" style="width:100%;margin-top:8px" onclick="generateKey()">[GENERATE]</button>
+ </div>
+ </div>
+</div>
+
+<!-- Reveal Key Modal (top-level for proper z-index) -->
+<div class="modal-overlay" id="revealKeyModal" style="display:none">
+ <div class="modal-box" style="max-width:500px">
+ <div class="panel-header">KEY GENERATED — COPY NOW
+ <button class="term-btn-sm" onclick="closeModal('revealKeyModal')">[X]</button>
+ </div>
+ <div style="padding:16px">
+ <div class="form-row">
+ <label>YOUR NEW KEY (shown once)</label>
+ <input type="text" id="revealedKey" class="term-input full" readonly style="font-size:11px">
+ </div>
+ <p class="muted" style="font-size:11px;margin-bottom:12px">⚠ This key won't be shown again. Copy it now.</p>
+ <button class="term-btn" style="width:100%" onclick="copyRevealedKey()">[COPY TO CLIPBOARD]</button>
+ <div id="copyStatus" style="margin-top:8px;text-align:center;font-size:11px"></div>
+ </div>
+ </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="#39ff14" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Flamingo body -->
+  <ellipse cx="34" cy="32" rx="14" ry="9" />
+  <!-- Long curved neck -->
+  <path d="M44 26 Q 50 18, 46 10 Q 42 6, 38 8" />
+  <!-- Head -->
+  <circle cx="38" cy="8" r="3" fill="#39ff14" />
+  <!-- Beak -->
+  <path d="M37 9 L 32 12" stroke-width="2" />
+  <!-- Eye -->
+  <circle cx="39" cy="7" r="0.6" fill="#0a0a0a" />
+  <!-- Legs (one bent) -->
+  <path d="M30 40 L 28 56" />
+  <path d="M36 40 L 38 48 L 34 56" />
+  <!-- Feet -->
+  <path d="M26 56 L 30 56" stroke-width="1.5" />
+  <path d="M32 56 L 36 56" stroke-width="1.5" />
+  <!-- Wing detail -->
+  <path d="M26 30 Q 30 26, 38 28" />
+</svg>

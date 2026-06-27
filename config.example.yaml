@@ -1,0 +1,95 @@
+# FLLMingo Configuration
+# Copy this to config.yaml and customize before first run.
+
+server:
+  host: 0.0.0.0
+  port: 8100
+  # Dashboard + API auth token. Set in .env as ROUTER_AUTH_TOKEN
+  auth_token_env: ROUTER_AUTH_TOKEN
+
+providers:
+  openrouter:
+    endpoint: https://openrouter.ai/api/v1
+    key_env: OPENROUTER_API_KEY
+    type: openai
+    max_retries: 2
+    timeout: 60
+    models:
+      anthropic/claude-sonnet-4:
+        strip_params: []
+        cost_per_1k_input: 0.003
+        cost_per_1k_output: 0.015
+
+  nvidia:
+    endpoint: https://integrate.api.nvidia.com/v1
+    key_env: NVIDIA_API_KEY
+    type: openai
+    timeout: 30
+    max_retries: 2
+    models: {}
+
+  google:
+    endpoint: https://generativelanguage.googleapis.com/v1beta/openai
+    key_env: GOOGLE_API_KEY
+    type: openai
+    timeout: 60
+    max_retries: 2
+    models: {}
+
+tiers:
+  fast:
+    strategy: fallback
+    models:
+      - provider: openrouter
+        model: anthropic/claude-sonnet-4
+
+  standard:
+    strategy: fallback
+    models: []
+
+  complex:
+    strategy: fallback
+    models: []
+
+routing:
+  default_tier: standard
+  aliases:
+    auto: standard
+    smart: complex
+  auto_strip_on_400:
+    - reasoning_effort
+    - service_tier
+
+# Circuit breaker — quarantines unhealthy providers
+circuit_breaker:
+  failure_threshold: 3
+  recovery_timeout: 60
+
+# Optional features — all disabled by default
+
+rate_limit:
+  enabled: false
+  requests_per_minute: 60
+  per: ip          # 'ip' or 'api_key'
+
+webhook:
+  enabled: false
+  type: discord    # 'discord', 'slack', or 'custom'
+  url: ''
+
+budget:
+  enabled: false
+  daily_limit: 0
+  monthly_limit: 0
+  alert_at_percent: 80
+  auto_pause: true
+
+health_probe:
+  enabled: false
+  interval_seconds: 300
+
+# Generated API keys (managed via dashboard, do not edit manually)
+api_keys: []
+
+# Prompt templates (managed via dashboard)
+prompt_templates: []

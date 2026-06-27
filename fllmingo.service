@@ -1,0 +1,25 @@
+[Unit]
+Description=FLLMingo — OpenAI-compatible LLM Router (FastAPI + uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust paths and User= for your install
+WorkingDirectory=/opt/fllmingo
+EnvironmentFile=/opt/fllmingo/.env
+ExecStart=/opt/fllmingo/.venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8100
+User=fllmingo
+Group=fllmingo
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/opt/fllmingo
+
+[Install]
+WantedBy=multi-user.target
