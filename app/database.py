@@ -284,7 +284,15 @@ async def is_quarantined(provider: str, threshold: int = 3) -> bool:
         )
         row = await cursor.fetchone()
         if row and row[0]:
-            return datetime.now(timezone.utc) < datetime.fromisoformat(row[0])
+            # SQLite's datetime('now', '+N seconds') returns a naive UTC string.
+            # Treat both sides as naive UTC to avoid offset-naive-vs-aware errors.
+            try:
+                qu = datetime.fromisoformat(row[0])
+                if qu.tzinfo is None:
+                    qu = qu.replace(tzinfo=timezone.utc)
+                return datetime.now(timezone.utc) < qu
+            except (ValueError, TypeError):
+                return False
         return False
 
 

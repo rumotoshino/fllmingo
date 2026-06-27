@@ -3,6 +3,23 @@
 All notable changes to FLLMingo are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.1b1] — 2026-06-27 (beta)
+
+Bugfix-only release. Squashes silent failures in request logging and the live dashboard.
+
+### Fixed
+
+- **`is_quarantined()` TypeError**: SQLite's `datetime('now', ...)` returned naive ISO strings; comparing them against a timezone-aware `datetime.now()` raised `TypeError: can't compare offset-naive and offset-aware datetimes` on every single chat completion. The exception bubbled past `log_request()`, so **successful requests never reached the database**. Naive timestamps are now coerced to UTC before comparison.
+- **Token explosion in streaming**: `prompt_tokens` / `completion_tokens` were accumulated with `+=` on every SSE chunk, but providers send *cumulative* usage. Result: tokens reported as 273k (or 0 if a stream ended without a usage chunk). Now assigns the latest non-zero value.
+- **Log row written after `done` yield**: dashboard's `loadStatus()` fired before the DB write completed → stale totals. Reordered so the row is logged *before* `done` is emitted.
+- **Live feed died after switching tabs**: `handleWSMessage` looked up `liveStream` element unconditionally; on non-STATUS pages it was `null`, throwing silently. WS handler now buffers events into a global ring and renders only when the element exists; `rehydrateLiveFeed()` replays the buffer when STATUS re-mounts.
+- **Usage Summary blank on initial mount**: `initApp()` only invoked `loadStatus()`. Now also runs `loadUsage()` and the 5s refresh covers both.
+
+### Changed
+
+- Live feed shows completion-token count next to each successful response (e.g. `✓ ... — 123ms $0.0042 (45 tok)`).
+- `loadStatus()` / `loadUsage()` errors are wrapped in try/catch inside the WS handler so a transient API hiccup can't kill the feed.
+
 ## [1.2.0] — 2026-06-26
 
 First public release. Renamed from `llm-router` to **FLLMingo** 🦩.

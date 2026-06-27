@@ -508,7 +508,8 @@ function initApp() {
     initNav();
     connectWS();
     loadStatus();
-    refreshInterval = setInterval(loadStatus, 5000);
+    loadUsage();
+    refreshInterval = setInterval(() => { loadStatus(); loadUsage(); }, 5000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -557,7 +558,7 @@ function switchPage(page) {
  p.classList.toggle('active', p.id === `page-${page}`);
  });
  switch (page) {
- case 'status': loadStatus(); loadUsage(); break;
+ case 'status': loadStatus(); loadUsage(); rehydrateLiveFeed(); break;
  case 'providers': loadProviders(); break;
  case 'tiers': loadTiers(); break;
  case 'logs': loadLogs(); break;
@@ -596,8 +597,11 @@ function connectWS() {
     ws.onerror = () => ws.close();
 }
 
+// Buffer of recent live events so feed survives page switches
+const _liveBuffer = [];
+const _LIVE_BUFFER_MAX = 100;
+
 function handleWSMessage(msg) {
-    const stream = document.getElementById('liveStream');
     const { type, data } = msg;
     let cls = '', text = '';
 
@@ -605,27 +609,61 @@ function handleWSMessage(msg) {
         case 'status':
             if (data.phase === 'attempt') { text = `→ trying ${data.model} via ${data.provider} (#${data.attempt})`; }
             else if (data.phase === 'failed') { text = `✗ ${data.provider} ${data.status}: ${data.error}`; cls = 'fail'; }
-            else if (data.phase === 'retry_strip') { text = `↻ retrying, stripped: ${data.stripped.join(', ')}`; cls = 'retry'; }
+            else if (data.phase === 'retry_strip') { text = `↻ retrying, stripped: ${(data.stripped || []).join(', ')}`; cls = 'retry'; }
             else if (data.phase === 'skip') { text = `⊘ ${data.provider} quarantined`; cls = 'fail'; }
             else return;
             break;
         case 'done':
             text = `✓ ${data.model} via ${data.provider} — ${data.latency_ms}ms`;
-            if (data.cost) text += ` $${data.cost.toFixed(4)}`;
+            if (typeof data.cost === 'number') text += ` $${data.cost.toFixed(4)}`;
+            if (typeof data.completion_tokens === 'number' && data.completion_tokens > 0) {
+                text += ` (${data.completion_tokens} tok)`;
+            }
             if (data.retried) text += ' [RETRIED]';
             cls = 'success';
-            loadStatus();
+            // Refresh status numbers — wrapped in try so a failure won't kill WS
+            try { loadStatus(); } catch (_) {}
+            try { if (typeof loadUsage === 'function') loadUsage(); } catch (_) {}
             break;
-        case 'error': text = `✗ FAILED: ${data.message}`; cls = 'fail'; break;
+        case 'error': text = `✗ FAILED: ${data.message || data.detail || 'unknown'}`; cls = 'fail'; break;
         default: return;
     }
 
     const now = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const lineText = `${now} ${text}`;
+    // Always buffer
+    _liveBuffer.push({ text: lineText, cls });
+    if (_liveBuffer.length > _LIVE_BUFFER_MAX) _liveBuffer.shift();
+
+    // Render only if liveStream is currently mounted
+    const stream = document.getElementById('liveStream');
+    if (!stream) return;
     const line = document.createElement('div');
     line.className = `log-line ${cls}`;
-    line.textContent = `${now} ${text}`;
-    if (stream.children.length > 100) stream.removeChild(stream.firstChild);
+    line.textContent = lineText;
+    if (stream.children.length > _LIVE_BUFFER_MAX) stream.removeChild(stream.firstChild);
     stream.appendChild(line);
+    stream.scrollTop = stream.scrollHeight;
+}
+
+// Re-render buffered events when STATUS page is re-entered
+function rehydrateLiveFeed() {
+    const stream = document.getElementById('liveStream');
+    if (!stream) return;
+    stream.innerHTML = '';
+    if (!_liveBuffer.length) {
+        const empty = document.createElement('div');
+        empty.className = 'log-line muted';
+        empty.textContent = '$ awaiting data...';
+        stream.appendChild(empty);
+        return;
+    }
+    for (const { text, cls } of _liveBuffer) {
+        const line = document.createElement('div');
+        line.className = `log-line ${cls}`;
+        line.textContent = text;
+        stream.appendChild(line);
+    }
     stream.scrollTop = stream.scrollHeight;
 }
 

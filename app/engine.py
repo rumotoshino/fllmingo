@@ -176,23 +176,19 @@ async def route_request(
                             try:
                                 chunk_data = json.loads(line[6:])
                                 usage = chunk_data.get("usage") or {}
-                                collected_prompt_tokens += usage.get("prompt_tokens", 0)
-                                collected_completion_tokens += usage.get("completion_tokens", 0)
+                                # Providers send CUMULATIVE usage; take latest non-zero
+                                pt = usage.get("prompt_tokens")
+                                ct = usage.get("completion_tokens")
+                                if pt is not None:
+                                    collected_prompt_tokens = pt
+                                if ct is not None:
+                                    collected_completion_tokens = ct
                             except json.JSONDecodeError:
                                 pass
                     elif line.strip():
                         yield ("chunk", line + "\n\n")
 
-                yield ("done", {
-                    "request_id": request_id,
-                    "provider": prov_name,
-                    "model": model_name,
-                    "tier": tier_name,
-                    "latency_ms": latency_ms,
-                    "stripped_params": strip_log,
-                })
-
-                # Log to DB
+                # Log to DB BEFORE yielding "done" so the frontend refresh sees fresh data
                 model_cfg = prov_cfg.get("models", {}).get(model_name, {})
                 cost = (collected_prompt_tokens / 1000) * model_cfg.get("cost_per_1k_input", 0) + \
                        (collected_completion_tokens / 1000) * model_cfg.get("cost_per_1k_output", 0)
@@ -206,10 +202,22 @@ async def route_request(
                     latency_ms=latency_ms,
                     prompt_tokens=collected_prompt_tokens,
                     completion_tokens=collected_completion_tokens,
-                    cost=cost,
+                    cost=round(cost, 6),
                     request_body=json.dumps(incoming_payload)[:5000],
                     stripped_params=",".join(strip_log) if strip_log else None,
                 )
+
+                yield ("done", {
+                    "request_id": request_id,
+                    "provider": prov_name,
+                    "model": model_name,
+                    "tier": tier_name,
+                    "latency_ms": latency_ms,
+                    "cost": round(cost, 6),
+                    "prompt_tokens": collected_prompt_tokens,
+                    "completion_tokens": collected_completion_tokens,
+                    "stripped_params": strip_log,
+                })
             elif isinstance(response, httpx.Response):
                 # Non-streaming JSON response
                 data = response.json()

@@ -1,6 +1,6 @@
 [project]
 name = "fllmingo"
-version = "1.2.0"
+version = "1.2.1b1"
 description = "FLLMingo — Self-hosted OpenAI-compatible LLM routing proxy with terminal-themed dashboard"
 readme = "README.md"
 license = { text = "MIT" }
