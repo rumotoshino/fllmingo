@@ -157,6 +157,7 @@ async def update_provider_health(provider: str, success: bool, error: str = ""):
     from .config import get_config
     _cfg = get_config()
     _cb = _cfg.get("circuit_breaker", {})
+    _enabled = _cb.get("enabled", True)
     _threshold = int(_cb.get("failure_threshold", 3))
     _recovery = int(_cb.get("recovery_timeout", 60))
     async with aiosqlite.connect(_DB_PATH) as db:
@@ -183,11 +184,11 @@ async def update_provider_health(provider: str, success: bool, error: str = ""):
                     last_failure=excluded.last_failure,
                     total_requests=provider_health.total_requests+1,
                     total_failures=provider_health.total_failures+1,
-                    status=CASE WHEN provider_health.consecutive_failures+1 >= ?
+                    status=CASE WHEN ? AND provider_health.consecutive_failures+1 >= ?
                         THEN 'quarantined' ELSE 'degraded' END,
-                    quarantined_until=CASE WHEN provider_health.consecutive_failures+1 >= ?
+                    quarantined_until=CASE WHEN ? AND provider_health.consecutive_failures+1 >= ?
                         THEN datetime('now', '+' || ? || ' seconds') ELSE NULL END""",
-                (provider, now, _threshold, _threshold, _recovery),
+                (provider, now, 1 if _enabled else 0, _threshold, 1 if _enabled else 0, _threshold, _recovery),
             )
         await db.commit()
 
@@ -277,6 +278,10 @@ async def get_leaderboard(
 
 
 async def is_quarantined(provider: str, threshold: int = 3) -> bool:
+    from .config import get_config
+    _cb = get_config().get("circuit_breaker", {})
+    if not _cb.get("enabled", True):
+        return False
     async with aiosqlite.connect(_DB_PATH) as db:
         cursor = await db.execute(
             "SELECT quarantined_until FROM provider_health WHERE provider = ?",

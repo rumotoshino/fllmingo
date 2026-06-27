@@ -3,6 +3,11 @@
 All notable changes to FLLMingo are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0b4] - 2026-06-27
+
+### Added
+- **Circuit Breaker toggle** in Settings — users can now disable auto-quarantine of failing providers. Disabling means all providers are always attempted regardless of health status.
+- Configurable failure threshold + recovery timeout (moved from config-only to dashboard-editable).
 ## [1.3.0b3] — 2026-06-27 (beta)
 
 ### Changed

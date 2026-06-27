@@ -712,6 +712,7 @@ function switchPage(page) {
   loadLatency();
   loadTemplates();
   loadHealthProbe();
+            loadCircuitBreaker();
   break;
  }
  if (typeof updateNavMoreState === 'function') updateNavMoreState();
@@ -1796,4 +1797,29 @@ async function renewKey(id) {
         document.getElementById('revealKeyModal').style.display = 'flex';
         loadApiKeys();
     } catch (e) { alert(`Failed: ${e.message}`); }
+}
+
+// ── Circuit Breaker ──
+async function loadCircuitBreaker() {
+    try {
+        const data = await api('/api/settings/circuit-breaker');
+        document.getElementById('cbEnabled').checked = data.enabled;
+        document.getElementById('cbThreshold').value = data.failure_threshold;
+        document.getElementById('cbRecovery').value = data.recovery_timeout;
+    } catch (e) { console.error('cb load', e); }
+}
+
+async function saveCircuitBreaker() {
+    const payload = {
+        enabled: document.getElementById('cbEnabled').checked,
+        failure_threshold: parseInt(document.getElementById('cbThreshold').value) || 3,
+        recovery_timeout: parseInt(document.getElementById('cbRecovery').value) || 60,
+    };
+    try {
+        await api('/api/settings/circuit-breaker', { method: 'PUT', body: JSON.stringify(payload) });
+        document.getElementById('cbStatus').innerHTML = '<span class="badge-online">✓ Saved</span>';
+        setTimeout(() => { const el = document.getElementById('cbStatus'); if (el) el.innerHTML = ''; }, 3000);
+    } catch (e) {
+        document.getElementById('cbStatus').innerHTML = '<span class="badge-offline">✗ ' + escapeHtml(e.message) + '</span>';
+    }
 }

@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     await _http_client.aclose()
 
 
-app = FastAPI(title="FLLMingo", version="1.3.0b3", lifespan=lifespan)
+app = FastAPI(title="FLLMingo", version="1.3.0b4", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -261,6 +261,33 @@ async def api_update_integrations(request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════════
+
+
+@app.get("/api/settings/circuit-breaker")
+async def api_get_circuit_breaker():
+    """Return current circuit_breaker config."""
+    cb = get_config().get("circuit_breaker", {})
+    return {
+        "enabled": cb.get("enabled", True),
+        "failure_threshold": int(cb.get("failure_threshold", 3)),
+        "recovery_timeout": int(cb.get("recovery_timeout", 60)),
+    }
+
+
+@app.put("/api/settings/circuit-breaker")
+async def api_update_circuit_breaker(request: Request):
+    """Update circuit_breaker config."""
+    body = await request.json()
+    cfg = get_config()
+    cfg["circuit_breaker"] = {
+        "enabled": bool(body.get("enabled", True)),
+        "failure_threshold": int(body.get("failure_threshold", 3)),
+        "recovery_timeout": int(body.get("recovery_timeout", 60)),
+    }
+    _save_config_yaml(cfg)
+    return {"status": "ok"}
+
+
 #  OpenAI-compatible API
 # ═══════════════════════════════════════════════════════════════════
 
