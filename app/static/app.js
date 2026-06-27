@@ -504,67 +504,34 @@ function toggleTheme() {
 
 
 
-// ─── Public Model Aliases (tier + direct) ───
+// ─── Public Model Aliases (direct only — specific provider+model) ───
 let _editingAlias = null;
-let _aliasProviderCache = {};  // {provider: [model_id, ...]}
-
-function _getAliasType() {
-    const r = document.querySelector('input[name="aliasType"]:checked');
-    return r ? r.value : 'tier';
-}
-
-function updateAliasTypeFields() {
-    const t = _getAliasType();
-    document.getElementById('aliasTierFields').style.display = t === 'tier' ? '' : 'none';
-    document.getElementById('aliasDirectFields').style.display = t === 'direct' ? '' : 'none';
-}
 
 async function loadAliases() {
     try {
         const aliases = await api('/api/aliases');
         const tbody = document.getElementById('aliasesBody');
         if (!aliases.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="muted">No aliases yet. Click [+ NEW ALIAS] to create one — they appear in /v1/models as first-class names.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="muted">No aliases yet. Click [+ NEW ALIAS] to create one — direct routes to a specific provider+model, retries on transient failures, no fallback.</td></tr>';
             return;
         }
-        tbody.innerHTML = aliases.map(a => {
-            const isDirect = a.type === 'direct';
-            const typeBadge = isDirect
-                ? '<span class="param-pill" style="color:var(--amber)">DIRECT</span>'
-                : '<span class="param-pill">TIER</span>';
-            const target = isDirect
-                ? `<code>${escapeHtml(a.provider || '?')}/${escapeHtml(a.model || '?')}</code><span class="muted" style="font-size:10px"> · retries: ${a.max_retries ?? 2}</span>`
-                : escapeHtml(a.tier || '');
-            return `
+        tbody.innerHTML = aliases.map(a => `
             <tr>
                 <td class="text-cyan"><code>${escapeHtml(a.name)}</code></td>
-                <td>${typeBadge}</td>
-                <td>${target}</td>
+                <td><code>${escapeHtml(a.provider || '?')}/${escapeHtml(a.model || '?')}</code></td>
+                <td>${a.max_retries ?? 2}</td>
                 <td>${escapeHtml(a.display_name || a.name)}</td>
                 <td class="muted">${escapeHtml(a.description || '—')}</td>
                 <td>
                     <button class="term-btn-sm" onclick="editAlias('${escapeAttr(a.name)}')">[EDIT]</button>
                     <button class="term-btn-sm btn-danger" onclick="deleteAlias('${escapeAttr(a.name)}')">[DEL]</button>
                 </td>
-            </tr>`;
-        }).join('');
+            </tr>
+        `).join('');
     } catch (e) {
         console.error('Aliases load failed:', e);
         const tb = document.getElementById('aliasesBody');
         if (tb) tb.innerHTML = '<tr><td colspan="6" class="text-red">Failed to load: ' + escapeHtml(e.message || e) + '</td></tr>';
-    }
-}
-
-async function _populateAliasTierDropdown(currentTier) {
-    const sel = document.getElementById('aliasTier');
-    if (!sel) return;
-    try {
-        const tiers = await api('/api/tiers');
-        const names = Object.keys(tiers);
-        sel.innerHTML = '<option value="">-- select tier --</option>' +
-            names.map(n => `<option value="${escapeHtml(n)}"${n === currentTier ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('');
-    } catch (e) {
-        sel.innerHTML = '<option value="">(failed to load tiers)</option>';
     }
 }
 
@@ -585,7 +552,6 @@ async function populateAliasModelDropdown() {
     const prov = document.getElementById('aliasProvider').value;
     const dl = document.getElementById('aliasModelOptions');
     if (!prov || !dl) { if (dl) dl.innerHTML = ''; return; }
-    // Lazy-fetch catalog if needed
     if (!catalogData || !catalogData.length) {
         try { catalogData = await api('/api/catalog'); } catch (_) {}
     }
@@ -603,13 +569,8 @@ async function showCreateAlias() {
     document.getElementById('aliasDescription').value = '';
     document.getElementById('aliasModel').value = '';
     document.getElementById('aliasMaxRetries').value = 2;
-    document.querySelector('input[name="aliasType"][value="tier"]').checked = true;
     document.getElementById('aliasStatus').textContent = '';
-    updateAliasTypeFields();
-    await Promise.all([
-        _populateAliasTierDropdown(''),
-        _populateAliasProviderDropdown(''),
-    ]);
+    await _populateAliasProviderDropdown('');
     document.getElementById('aliasModal').style.display = 'flex';
 }
 
@@ -626,22 +587,10 @@ async function editAlias(name) {
         document.getElementById('aliasOwnedBy').value = a.owned_by || '';
         document.getElementById('aliasDescription').value = a.description || '';
         document.getElementById('aliasStatus').textContent = '';
-
-        const isDirect = a.type === 'direct';
-        document.querySelector(`input[name="aliasType"][value="${isDirect ? 'direct' : 'tier'}"]`).checked = true;
-        updateAliasTypeFields();
-
-        if (isDirect) {
-            await _populateAliasProviderDropdown(a.provider);
-            document.getElementById('aliasModel').value = a.model || '';
-            document.getElementById('aliasMaxRetries').value = a.max_retries ?? 2;
-            await populateAliasModelDropdown();
-            await _populateAliasTierDropdown('');
-        } else {
-            await _populateAliasTierDropdown(a.tier || '');
-            await _populateAliasProviderDropdown('');
-        }
-
+        await _populateAliasProviderDropdown(a.provider || '');
+        document.getElementById('aliasModel').value = a.model || '';
+        document.getElementById('aliasMaxRetries').value = a.max_retries ?? 2;
+        await populateAliasModelDropdown();
         document.getElementById('aliasModal').style.display = 'flex';
     } catch (e) { alert('Failed: ' + e.message); }
 }
@@ -651,28 +600,20 @@ async function saveAlias() {
     const status = document.getElementById('aliasStatus');
     if (!name) { status.innerHTML = '<span class="text-red">> name is required</span>'; return; }
 
-    const type = _getAliasType();
+    const provider = document.getElementById('aliasProvider').value;
+    const model = document.getElementById('aliasModel').value.trim();
+    const maxRetries = parseInt(document.getElementById('aliasMaxRetries').value, 10);
+    if (!provider) { status.innerHTML = '<span class="text-red">> provider required</span>'; return; }
+    if (!model) { status.innerHTML = '<span class="text-red">> model required</span>'; return; }
+
     const body = {
-        type,
+        provider,
+        model,
+        max_retries: Number.isFinite(maxRetries) ? maxRetries : 2,
         display_name: document.getElementById('aliasDisplay').value.trim(),
         owned_by: document.getElementById('aliasOwnedBy').value.trim() || 'fllmingo',
         description: document.getElementById('aliasDescription').value.trim(),
     };
-
-    if (type === 'direct') {
-        const provider = document.getElementById('aliasProvider').value;
-        const model = document.getElementById('aliasModel').value.trim();
-        const maxRetries = parseInt(document.getElementById('aliasMaxRetries').value, 10);
-        if (!provider) { status.innerHTML = '<span class="text-red">> provider required</span>'; return; }
-        if (!model) { status.innerHTML = '<span class="text-red">> model required</span>'; return; }
-        body.provider = provider;
-        body.model = model;
-        body.max_retries = Number.isFinite(maxRetries) ? maxRetries : 2;
-    } else {
-        const tier = document.getElementById('aliasTier').value;
-        if (!tier) { status.innerHTML = '<span class="text-red">> target tier required</span>'; return; }
-        body.tier = tier;
-    }
 
     try {
         if (_editingAlias) {

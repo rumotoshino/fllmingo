@@ -247,15 +247,15 @@
             <button class="term-btn-sm" onclick="showCreateAlias()">[+ NEW ALIAS]</button>
         </div>
         <div style="padding:8px 12px 4px 12px" class="muted" style="font-size:11px">
-            Aliases appear as first-class models in <code>/v1/models</code>. Clients see <code>GPT5</code> or <code>fast-claude</code> instead of <code>standard</code> or <code>complex</code>.
+            Aliases appear as first-class models in <code>/v1/models</code>. Each alias points to a specific provider+model with no fallback — only retries on transient failures.
         </div>
         <div class="table-wrap">
             <table class="term-table">
                 <thead>
                     <tr>
                         <th>PUBLIC NAME</th>
-                        <th>TYPE</th>
-                        <th>TARGET</th>
+                        <th>TARGET (provider/model)</th>
+                        <th>RETRIES</th>
                         <th>DISPLAY NAME</th>
                         <th>DESCRIPTION</th>
                         <th>ACTIONS</th>
@@ -320,44 +320,23 @@
             </div>
             <div style="padding:16px">
                 <div class="form-row">
-                    <label>ALIAS TYPE</label>
-                    <div class="tier-checkbox-grid" id="aliasTypeRadios">
-                        <label class="tier-check"><input type="radio" name="aliasType" value="tier" checked onchange="updateAliasTypeFields()" /> <span>Tier (fallback chain)</span></label>
-                        <label class="tier-check"><input type="radio" name="aliasType" value="direct" onchange="updateAliasTypeFields()" /> <span>Direct (specific model + retries)</span></label>
-                    </div>
+                    <label>PUBLIC NAME (what clients see)</label>
+                    <input type="text" id="aliasName" class="term-input full" placeholder="e.g. claude-sonnet-direct">
                 </div>
                 <div class="form-row">
-                    <label>PUBLIC NAME (what clients see)</label>
-                    <input type="text" id="aliasName" class="term-input full" placeholder="e.g. GPT5 or claude-sonnet-direct">
+                    <label>PROVIDER</label>
+                    <select id="aliasProvider" class="term-select full" onchange="populateAliasModelDropdown()">
+                        <option value="">-- select provider --</option>
+                    </select>
                 </div>
-
-                <!-- Tier-type fields -->
-                <div id="aliasTierFields">
-                    <div class="form-row">
-                        <label>ROUTES TO TIER</label>
-                        <select id="aliasTier" class="term-select full">
-                            <option value="">-- select tier --</option>
-                        </select>
-                    </div>
+                <div class="form-row">
+                    <label>MODEL</label>
+                    <input type="text" id="aliasModel" class="term-input full" placeholder="e.g. anthropic/claude-sonnet-4" list="aliasModelOptions" />
+                    <datalist id="aliasModelOptions"></datalist>
                 </div>
-
-                <!-- Direct-type fields -->
-                <div id="aliasDirectFields" style="display:none">
-                    <div class="form-row">
-                        <label>PROVIDER</label>
-                        <select id="aliasProvider" class="term-select full" onchange="populateAliasModelDropdown()">
-                            <option value="">-- select provider --</option>
-                        </select>
-                    </div>
-                    <div class="form-row">
-                        <label>MODEL</label>
-                        <input type="text" id="aliasModel" class="term-input full" placeholder="e.g. anthropic/claude-sonnet-4" list="aliasModelOptions" />
-                        <datalist id="aliasModelOptions"></datalist>
-                    </div>
-                    <div class="form-row">
-                        <label>MAX RETRIES (0-10)</label>
-                        <input type="number" id="aliasMaxRetries" class="term-input full" value="2" min="0" max="10" />
-                    </div>
+                <div class="form-row">
+                    <label>MAX RETRIES (0-10)</label>
+                    <input type="number" id="aliasMaxRetries" class="term-input full" value="2" min="0" max="10" />
                 </div>
 
                 <div class="form-row">
@@ -792,7 +771,7 @@
  <div class="stats-grid">
  <div class="stat-card">
  <div class="stat-label">$ VERSION</div>
- <div class="stat-value">v1.3.0b2</div>
+ <div class="stat-value">v1.3.0b3</div>
  </div>
  <div class="stat-card">
  <div class="stat-label">$ PORT</div>

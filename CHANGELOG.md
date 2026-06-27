@@ -3,6 +3,18 @@
 All notable changes to FLLMingo are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0b3] — 2026-06-27 (beta)
+
+### Changed
+
+- **Public aliases are direct-only.** The whole point of public aliases is exposing specific models with predictable routing — tier-aliases were duplicating what tier names themselves already do (clients can call `standard` directly). The Tiers tab UI now only shows direct aliases and only lets you create direct ones. `GET /api/aliases` filters to `type=='direct'`. POST/PUT no longer accept a `tier` field. `/v1/models` only lists direct aliases as first-class models.
+- Aliases table simplified to: PUBLIC NAME · TARGET (provider/model) · RETRIES · DISPLAY NAME · DESCRIPTION · ACTIONS.
+- Alias modal no longer has a type radio toggle — provider/model/retries are top-level fields.
+
+### Note
+
+- Internal `routing.aliases` config entries with `type != "direct"` are still **honored as routing shortcuts** (so existing `auto → standard` style mappings keep working), they just don't appear in the public alias UI or `/v1/models`. Backward compatible.
+
 ## [1.3.0b2] — 2026-06-27 (beta)
 
 ### Added
