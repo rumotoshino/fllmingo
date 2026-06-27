@@ -310,16 +310,30 @@ async def chat_completions(request: Request, _=Depends(verify_auth)):
 
 @app.get("/v1/models")
 async def list_models(_=Depends(verify_auth)):
-    """Return available models (OpenAI-compatible)."""
+    """Return available models (OpenAI-compatible).
+
+    Exposes ONLY what the user explicitly chose to publish:
+      - Direct aliases (named models with specific provider+model targets)
+      - Tier names (standard, complex, etc.) for tier-based selection
+
+    Provider-registered model entries in config.yaml are for cost tracking
+    and routing only — they are NOT exposed here. Use aliases to publish them.
+    """
     cfg = get_config()
     models_list = []
-    # Public aliases — direct model targets only (tier aliases are routing shortcuts, hidden)
+    seen_ids = set()
+
+    # 1. Direct aliases — first-class published models
     aliases = cfg.get("routing", {}).get("aliases", {}) or {}
     for alias_name, alias_def in aliases.items():
         if not isinstance(alias_def, dict) or alias_def.get("type") != "direct":
             continue
+        model_id = alias_def.get("display_name") or alias_name
+        if model_id in seen_ids:
+            continue
+        seen_ids.add(model_id)
         entry = {
-            "id": alias_def.get("display_name") or alias_name,
+            "id": model_id,
             "object": "model",
             "owned_by": alias_def.get("owned_by", "fllmingo"),
             "fllmingo_direct": True,
@@ -328,22 +342,19 @@ async def list_models(_=Depends(verify_auth)):
         if alias_def.get("description"):
             entry["description"] = alias_def["description"]
         models_list.append(entry)
-    # Tier names as "models"
+
+    # 2. Tier names — for clients that want tier-based routing
     for tier_name in cfg.get("tiers", {}):
+        if tier_name in seen_ids:
+            continue
+        seen_ids.add(tier_name)
         models_list.append({
             "id": tier_name,
             "object": "model",
             "owned_by": "fllmingo",
             "fllmingo_tier": True,
         })
-    # Actual models from providers
-    for prov_name, prov_cfg in cfg.get("providers", {}).items():
-        for model_name in prov_cfg.get("models", {}):
-            models_list.append({
-                "id": model_name,
-                "object": "model",
-                "owned_by": prov_name,
-            })
+
     return {"object": "list", "data": models_list}
 
 
