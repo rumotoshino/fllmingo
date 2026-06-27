@@ -3,6 +3,21 @@
 All notable changes to FLLMingo are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0b2] — 2026-06-27 (beta)
+
+### Added
+
+- **Direct model aliases** — second alias type that targets a specific `(provider, model)` pair instead of a tier. Unlike tier aliases, direct aliases **never fall back** to other providers; if the target fails, FLLMingo retries on the same target up to a user-configurable `max_retries` count (0–10, default 2) using exponential backoff on 5xx/429. Perfect for harnesses that want a known model with no surprises.
+- Each alias now has a `type` field: `"tier"` (existing behavior) or `"direct"` (new). The Tiers page UI shows a radio toggle when creating/editing — switch between tier and direct without leaving the modal.
+- Direct aliases appear in `/v1/models` with `fllmingo_direct: true` and `fllmingo_target: "<provider>/<model>"` so clients can introspect them.
+- New columns on the aliases table: `TYPE` (pill badge) and `TARGET` (tier name or `provider/model` + retry count).
+
+### Changed
+
+- `resolve_direct_alias()` runs **before** `resolve_tier()` so direct aliases take precedence over tier aliases sharing a name.
+- Engine routes direct aliases through `_retry_with_backoff()` instead of the fallback chain. `max_retries=0` means "try once and give up."
+- POST/PUT `/api/aliases` validate provider names against the registered providers; bad provider returns 404 immediately.
+
 ## [1.3.0b1] — 2026-06-27 (beta)
 
 ### Added

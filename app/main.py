@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
     watcher = asyncio.create_task(watch_config())
     probe = asyncio.create_task(health_probe_loop())
     logger.info("╔══════════════════════════════════════════╗")
-    logger.info("║  FLLMingo v1.3.0b1 — [SYSTEM ACTIVE]     ║")
+    logger.info("║  FLLMingo v1.3.0b2 — [SYSTEM ACTIVE]     ║")
     logger.info("╚══════════════════════════════════════════╝")
     yield
     watcher.cancel()
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     await _http_client.aclose()
 
 
-app = FastAPI(title="FLLMingo", version="1.3.0b1", lifespan=lifespan)
+app = FastAPI(title="FLLMingo", version="1.3.0b2", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -313,7 +313,7 @@ async def list_models(_=Depends(verify_auth)):
     """Return available models (OpenAI-compatible)."""
     cfg = get_config()
     models_list = []
-    # Aliases — first-class public model names that route to tiers
+    # Aliases — first-class public model names (tier OR direct)
     aliases = cfg.get("routing", {}).get("aliases", {}) or {}
     for alias_name, alias_def in aliases.items():
         if isinstance(alias_def, dict):
@@ -321,10 +321,14 @@ async def list_models(_=Depends(verify_auth)):
                 "id": alias_def.get("display_name") or alias_name,
                 "object": "model",
                 "owned_by": alias_def.get("owned_by", "fllmingo"),
-                "fllmingo_alias_for": alias_def.get("tier", ""),
             }
             if alias_def.get("description"):
                 entry["description"] = alias_def["description"]
+            if alias_def.get("type") == "direct":
+                entry["fllmingo_direct"] = True
+                entry["fllmingo_target"] = f"{alias_def.get('provider', '')}/{alias_def.get('model', '')}"
+            else:
+                entry["fllmingo_alias_for"] = alias_def.get("tier", "")
             models_list.append(entry)
         # legacy string aliases stay hidden from /v1/models so they don't pollute listings
     # Tier names as "models"
@@ -1391,17 +1395,26 @@ async def api_list_aliases():
     result = []
     for name, val in aliases.items():
         if isinstance(val, dict):
-            result.append({
+            is_direct = val.get("type") == "direct"
+            entry = {
                 "name": name,
-                "tier": val.get("tier", ""),
+                "type": "direct" if is_direct else "tier",
                 "display_name": val.get("display_name", name),
                 "description": val.get("description", ""),
                 "owned_by": val.get("owned_by", "fllmingo"),
                 "rich": True,
-            })
+            }
+            if is_direct:
+                entry["provider"] = val.get("provider", "")
+                entry["model"] = val.get("model", "")
+                entry["max_retries"] = int(val.get("max_retries", 2))
+            else:
+                entry["tier"] = val.get("tier", "")
+            result.append(entry)
         else:
             result.append({
                 "name": name,
+                "type": "tier",
                 "tier": str(val),
                 "display_name": name,
                 "description": "",
@@ -1416,24 +1429,49 @@ async def api_create_alias(request: Request):
     """Create a new public model alias."""
     body = await request.json()
     name = (body.get("name") or "").strip()
-    tier = (body.get("tier") or "").strip()
     if not name:
         raise HTTPException(400, "Name is required")
-    if not tier:
-        raise HTTPException(400, "Target tier is required")
     cfg = get_config()
-    if tier not in cfg.get("tiers", {}):
-        raise HTTPException(404, f"Tier '{tier}' not found")
     routing = cfg.setdefault("routing", {})
     aliases = routing.setdefault("aliases", {})
     if name in aliases:
         raise HTTPException(409, f"Alias '{name}' already exists")
-    aliases[name] = {
-        "tier": tier,
-        "display_name": (body.get("display_name") or name).strip(),
-        "description": (body.get("description") or "").strip(),
-        "owned_by": (body.get("owned_by") or "fllmingo").strip(),
-    }
+
+    alias_type = (body.get("type") or "tier").strip().lower()
+
+    if alias_type == "direct":
+        provider = (body.get("provider") or "").strip()
+        model = (body.get("model") or "").strip()
+        if not provider or not model:
+            raise HTTPException(400, "provider and model are required for direct aliases")
+        if provider not in cfg.get("providers", {}):
+            raise HTTPException(404, f"Provider '{provider}' not found")
+        try:
+            max_retries = int(body.get("max_retries", 2))
+        except (TypeError, ValueError):
+            max_retries = 2
+        max_retries = max(0, min(max_retries, 10))
+        aliases[name] = {
+            "type": "direct",
+            "provider": provider,
+            "model": model,
+            "max_retries": max_retries,
+            "display_name": (body.get("display_name") or name).strip(),
+            "description": (body.get("description") or "").strip(),
+            "owned_by": (body.get("owned_by") or "fllmingo").strip(),
+        }
+    else:
+        tier = (body.get("tier") or "").strip()
+        if not tier:
+            raise HTTPException(400, "Target tier is required for tier aliases")
+        if tier not in cfg.get("tiers", {}):
+            raise HTTPException(404, f"Tier '{tier}' not found")
+        aliases[name] = {
+            "tier": tier,
+            "display_name": (body.get("display_name") or name).strip(),
+            "description": (body.get("description") or "").strip(),
+            "owned_by": (body.get("owned_by") or "fllmingo").strip(),
+        }
     _save_config_yaml(cfg)
     return {"status": "ok", "name": name}
 
@@ -1453,11 +1491,31 @@ async def api_update_alias(name: str, request: Request):
     if not isinstance(cur, dict):
         cur = {"tier": str(cur), "display_name": name, "description": "", "owned_by": "fllmingo"}
 
-    tier = body.get("tier")
-    if tier is not None:
-        if tier not in cfg.get("tiers", {}):
-            raise HTTPException(404, f"Tier '{tier}' not found")
-        cur["tier"] = tier
+    # Direct alias fields
+    if cur.get("type") == "direct" or body.get("type") == "direct":
+        cur["type"] = "direct"
+        if "provider" in body:
+            prov = (body.get("provider") or "").strip()
+            if prov and prov not in cfg.get("providers", {}):
+                raise HTTPException(404, f"Provider '{prov}' not found")
+            cur["provider"] = prov
+        if "model" in body:
+            cur["model"] = (body.get("model") or "").strip()
+        if "max_retries" in body:
+            try:
+                mr = int(body.get("max_retries", 2))
+            except (TypeError, ValueError):
+                mr = 2
+            cur["max_retries"] = max(0, min(mr, 10))
+        # Direct aliases shouldn't keep a stale "tier" field
+        cur.pop("tier", None)
+    else:
+        tier = body.get("tier")
+        if tier is not None:
+            if tier not in cfg.get("tiers", {}):
+                raise HTTPException(404, f"Tier '{tier}' not found")
+            cur["tier"] = tier
+
     if "display_name" in body:
         cur["display_name"] = (body["display_name"] or name).strip()
     if "description" in body:

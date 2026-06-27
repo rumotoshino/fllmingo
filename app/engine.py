@@ -12,7 +12,7 @@ from typing import Any, AsyncGenerator
 import httpx
 
 from . import database as db
-from .config import get_config, resolve_tier, get_provider_config
+from .config import get_config, resolve_tier, resolve_direct_alias, get_provider_config
 from .sanitizer import sanitize_for_model, auto_strip_on_400
 
 logger = logging.getLogger("llm-router.engine")
@@ -110,27 +110,44 @@ async def route_request(
     is_stream = incoming_payload.get("stream", False)
     start_time = time.monotonic()
 
-    # ── Resolve tier ──────────────────────────────────────────────
-    tier_result = resolve_tier(incoming_model)
-    
-    if tier_result:
-        tier_name, tier_cfg = tier_result
-        candidates = tier_cfg.get("models", [])
-        strategy = tier_cfg.get("strategy", "fallback")
-        yield ("status", {"phase": "resolved", "tier": tier_name, "candidates": len(candidates)})
+    # ── Resolve: direct alias FIRST (highest priority) ───────────
+    direct = resolve_direct_alias(incoming_model)
+    if direct:
+        tier_name = "direct"
+        candidates = [{"provider": direct["provider"], "model": direct["model"]}]
+        # Override candidates list — direct aliases never fall back to others
+        max_direct_retries = direct["max_retries"]
+        yield ("status", {
+            "phase": "resolved",
+            "tier": "direct",
+            "alias": incoming_model,
+            "provider": direct["provider"],
+            "model": direct["model"],
+            "max_retries": max_direct_retries,
+            "candidates": 1,
+        })
     else:
-        # Passthrough — model is not a tier name, try to route directly
-        tier_name = "passthrough"
-        # Find which provider serves this model
-        candidates = []
-        for prov_name, prov_cfg in get_config().get("providers", {}).items():
-            models = prov_cfg.get("models", {})
-            if incoming_model in models or "*" in models:
-                candidates.append({"provider": prov_name, "model": incoming_model})
-        if not candidates:
-            yield ("error", {"code": 404, "message": f"No provider found for model '{incoming_model}'"})
-            return
-        yield ("status", {"phase": "resolved", "tier": "passthrough", "candidates": len(candidates)})
+        max_direct_retries = None  # signal: not a direct alias
+        # ── Resolve tier (existing logic) ─────────────────────────
+        tier_result = resolve_tier(incoming_model)
+        if tier_result:
+            tier_name, tier_cfg = tier_result
+            candidates = tier_cfg.get("models", [])
+            strategy = tier_cfg.get("strategy", "fallback")
+            yield ("status", {"phase": "resolved", "tier": tier_name, "candidates": len(candidates)})
+        else:
+            # Passthrough — model is not a tier name, try to route directly
+            tier_name = "passthrough"
+            # Find which provider serves this model
+            candidates = []
+            for prov_name, prov_cfg in get_config().get("providers", {}).items():
+                models = prov_cfg.get("models", {})
+                if incoming_model in models or "*" in models:
+                    candidates.append({"provider": prov_name, "model": incoming_model})
+            if not candidates:
+                yield ("error", {"code": 404, "message": f"No provider found for model '{incoming_model}'"})
+                return
+            yield ("status", {"phase": "resolved", "tier": "passthrough", "candidates": len(candidates)})
 
     # ── Try each candidate (fallback chain) ───────────────────────
     last_error = ""
@@ -153,10 +170,18 @@ async def route_request(
             continue
 
         strip_log: list[str] = []
-        status, response, error = await _forward_to_provider(
-            client, prov_name, prov_cfg, model_name,
-            incoming_payload, strip_applied=strip_log,
-        )
+        # Direct aliases retry on transient failures (5xx/429); tiers fall back.
+        if max_direct_retries is not None:
+            status, response, error = await _retry_with_backoff(
+                client, prov_name, prov_cfg, model_name,
+                incoming_payload, strip_applied=strip_log,
+                max_attempts=max_direct_retries + 1,
+            )
+        else:
+            status, response, error = await _forward_to_provider(
+                client, prov_name, prov_cfg, model_name,
+                incoming_payload, strip_applied=strip_log,
+            )
 
         latency_ms = int((time.monotonic() - start_time) * 1000)
 

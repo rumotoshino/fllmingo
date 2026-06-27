@@ -132,6 +132,33 @@ def resolve_tier(model_field: str) -> tuple[str, dict[str, Any]] | None:
     return None
 
 
+
+
+def resolve_direct_alias(model_field: str) -> dict | None:
+    """Resolve a model string to a direct (provider, model, max_retries) target.
+
+    Returns None if it's not a direct alias. Direct aliases skip the tier
+    fallback chain entirely and only ever talk to the specified provider+model,
+    with up to max_retries on transient failures.
+    """
+    cfg = get_config()
+    aliases = cfg.get("routing", {}).get("aliases", {}) or {}
+    entry = aliases.get(model_field)
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("type") != "direct":
+        return None
+    provider = (entry.get("provider") or "").strip()
+    model = (entry.get("model") or "").strip()
+    if not provider or not model:
+        return None
+    try:
+        max_retries = int(entry.get("max_retries", 2))
+    except (TypeError, ValueError):
+        max_retries = 2
+    max_retries = max(0, min(max_retries, 10))  # clamp 0..10
+    return {"provider": provider, "model": model, "max_retries": max_retries}
+
 async def watch_config(interval: float = 2.0):
     """Poll config file for changes (lightweight alternative to watchfiles)."""
     while True:

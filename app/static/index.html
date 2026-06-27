@@ -254,7 +254,8 @@
                 <thead>
                     <tr>
                         <th>PUBLIC NAME</th>
-                        <th>ROUTES TO TIER</th>
+                        <th>TYPE</th>
+                        <th>TARGET</th>
                         <th>DISPLAY NAME</th>
                         <th>DESCRIPTION</th>
                         <th>ACTIONS</th>
@@ -319,15 +320,46 @@
             </div>
             <div style="padding:16px">
                 <div class="form-row">
-                    <label>PUBLIC NAME (what clients see)</label>
-                    <input type="text" id="aliasName" class="term-input full" placeholder="e.g. GPT5 or fast-claude">
+                    <label>ALIAS TYPE</label>
+                    <div class="tier-checkbox-grid" id="aliasTypeRadios">
+                        <label class="tier-check"><input type="radio" name="aliasType" value="tier" checked onchange="updateAliasTypeFields()" /> <span>Tier (fallback chain)</span></label>
+                        <label class="tier-check"><input type="radio" name="aliasType" value="direct" onchange="updateAliasTypeFields()" /> <span>Direct (specific model + retries)</span></label>
+                    </div>
                 </div>
                 <div class="form-row">
-                    <label>ROUTES TO TIER</label>
-                    <select id="aliasTier" class="term-select full">
-                        <option value="">-- select tier --</option>
-                    </select>
+                    <label>PUBLIC NAME (what clients see)</label>
+                    <input type="text" id="aliasName" class="term-input full" placeholder="e.g. GPT5 or claude-sonnet-direct">
                 </div>
+
+                <!-- Tier-type fields -->
+                <div id="aliasTierFields">
+                    <div class="form-row">
+                        <label>ROUTES TO TIER</label>
+                        <select id="aliasTier" class="term-select full">
+                            <option value="">-- select tier --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Direct-type fields -->
+                <div id="aliasDirectFields" style="display:none">
+                    <div class="form-row">
+                        <label>PROVIDER</label>
+                        <select id="aliasProvider" class="term-select full" onchange="populateAliasModelDropdown()">
+                            <option value="">-- select provider --</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label>MODEL</label>
+                        <input type="text" id="aliasModel" class="term-input full" placeholder="e.g. anthropic/claude-sonnet-4" list="aliasModelOptions" />
+                        <datalist id="aliasModelOptions"></datalist>
+                    </div>
+                    <div class="form-row">
+                        <label>MAX RETRIES (0-10)</label>
+                        <input type="number" id="aliasMaxRetries" class="term-input full" value="2" min="0" max="10" />
+                    </div>
+                </div>
+
                 <div class="form-row">
                     <label>DISPLAY NAME (optional, shown in <code>/v1/models</code>)</label>
                     <input type="text" id="aliasDisplay" class="term-input full" placeholder="defaults to public name">
@@ -760,7 +792,7 @@
  <div class="stats-grid">
  <div class="stat-card">
  <div class="stat-label">$ VERSION</div>
- <div class="stat-value">v1.3.0b1</div>
+ <div class="stat-value">v1.3.0b2</div>
  </div>
  <div class="stat-card">
  <div class="stat-label">$ PORT</div>
