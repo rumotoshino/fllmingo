@@ -12,7 +12,7 @@ from typing import Any, AsyncGenerator
 import httpx
 
 from . import database as db
-from .config import get_config, resolve_tier, resolve_direct_alias, get_provider_config
+from .config import get_config, resolve_tier, resolve_direct_alias, get_provider_config, get_passthrough_config
 from .sanitizer import sanitize_for_model, auto_strip_on_400
 
 logger = logging.getLogger("llm-router.engine")
@@ -38,9 +38,10 @@ async def _forward_to_provider(
     timeout = provider_cfg.get("timeout", 60)
 
     headers = {
-        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     # Sanitize params for this specific model
     payload, stripped = sanitize_for_model(payload, provider_name, model)
@@ -136,32 +137,37 @@ async def route_request(
             strategy = tier_cfg.get("strategy", "fallback")
             yield ("status", {"phase": "resolved", "tier": tier_name, "candidates": len(candidates)})
         else:
-            # Passthrough — model is not a tier name, try to route directly
+            # Passthrough — model is not a tier name or alias
             tier_name = "passthrough"
-            # Find passthrough tiers and their allowed_providers
-            all_tiers = config.get("tiers", {})
-            passthrough_providers = set()
-            passthrough_tier = None
-            for t_name, t_cfg in all_tiers.items():
-                if t_cfg.get("passthrough"):
-                    passthrough_tier = t_name
-                    passthrough_providers.update(t_cfg.get("allowed_providers", []))
-            # Find which provider serves this model
-            candidates = []
-            for prov_name, prov_cfg in config.get("providers", {}).items():
-                # If passthrough tiers exist, only search their allowed_providers
-                if passthrough_providers and prov_name not in passthrough_providers:
-                    continue
-                models = prov_cfg.get("models", {})
-                if incoming_model in models or "*" in models:
-                    candidates.append({"provider": prov_name, "model": incoming_model})
-            if not candidates:
-                if passthrough_providers:
-                    yield ("error", {"code": 404, "message": f"No provider for '{incoming_model}' in allowed providers: {sorted(passthrough_providers)}"})
-                else:
-                    yield ("error", {"code": 404, "message": f"No provider found for model '{incoming_model}'"})
+            pt = get_passthrough_config()
+            if not pt["enabled"]:
+                yield ("error", {"code": 404, "message": f"No tier or alias matched '{incoming_model}', and passthrough is disabled"})
                 return
-            yield ("status", {"phase": "resolved", "tier": passthrough_tier or "passthrough", "candidates": len(candidates)})
+
+            allowed = set(pt["providers"])
+            candidates = []
+
+            # 1. Try live catalog cache (has all models the provider actually serves)
+            #    Imported lazily to avoid circular import with main.py
+            from .main import _catalog_cache
+            catalog = _catalog_cache.get("data", [])
+            for m in catalog:
+                if m["id"] == incoming_model and m["provider"] in allowed:
+                    candidates.append({"provider": m["provider"], "model": incoming_model})
+
+            # 2. Cold-start fallback: catalog empty → check static config models map
+            if not candidates:
+                for prov_name, prov_cfg in config.get("providers", {}).items():
+                    if prov_name not in allowed:
+                        continue
+                    models = prov_cfg.get("models", {})
+                    if incoming_model in models or "*" in models:
+                        candidates.append({"provider": prov_name, "model": incoming_model})
+
+            if not candidates:
+                yield ("error", {"code": 404, "message": f"Model '{incoming_model}' not found in passthrough providers: {sorted(allowed)}"})
+                return
+            yield ("status", {"phase": "resolved", "tier": "passthrough", "candidates": len(candidates)})
 
     # ── Try each candidate (fallback chain) ───────────────────────
     last_error = ""
