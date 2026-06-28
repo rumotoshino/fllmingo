@@ -150,6 +150,53 @@ async function testWebhook() {
 
 
 
+// ─── Settings: Passthrough ───
+async function loadPassthroughSettings() {
+    try {
+        const [pt, cfg] = await Promise.all([api('/api/settings/passthrough'), api('/api/config')]);
+        const providers = Object.keys(cfg.providers || {});
+        const allowed = new Set(pt.providers || []);
+        const container = document.getElementById('passthroughSettings');
+        if (!container) return;
+        container.innerHTML = `
+            <div class="setting-row" style="margin-bottom:12px">
+                <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+                    <input type="checkbox" id="passthroughEnabled" ${pt.enabled ? 'checked' : ''} />
+                    <strong>Enable passthrough</strong>
+                </label>
+                <div class="muted" style="font-size:11px;margin-top:4px">
+                    When ON, any model from ticked providers' full catalog is routable + listed in /v1/models.
+                    Unticked providers expose only their direct aliases.
+                </div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+                ${providers.map(pn => `
+                    <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+                        <input type="checkbox" class="passthrough-prov" value="${escapeHtml(pn)}" ${allowed.has(pn) ? 'checked' : ''} ${!pt.enabled ? 'disabled' : ''} />
+                        ${escapeHtml(pn)}
+                    </label>`).join('')}
+            </div>
+            <button class="term-btn-sm" style="margin-top:10px" onclick="savePassthrough()">[SAVE]</button>
+        `;
+        const toggle = document.getElementById('passthroughEnabled');
+        toggle.addEventListener('change', () => {
+            document.querySelectorAll('.passthrough-prov').forEach(cb => cb.disabled = !toggle.checked);
+        });
+    } catch (e) { console.error('Passthrough load failed:', e); }
+}
+
+async function savePassthrough() {
+    const enabled = document.getElementById('passthroughEnabled').checked;
+    const providers = [...document.querySelectorAll('.passthrough-prov:checked')].map(cb => cb.value);
+    try {
+        await api('/api/settings/passthrough', {
+            method: 'PUT',
+            body: JSON.stringify({ enabled, providers }),
+        });
+        loadPassthroughSettings();
+    } catch (e) { alert(`Failed: ${e.message}`); }
+}
+
 // ─── Settings: Budget ───
 async function loadBudget() {
     try {
@@ -709,6 +756,7 @@ function switchPage(page) {
  case 'settings':
   loadApiKeys();
   loadIntegrations();
+  loadPassthroughSettings();
   loadBudget();
   loadLatency();
   loadTemplates();
@@ -1093,13 +1141,7 @@ async function loadTiers() {
         const tierAliases = {};
         for (const [a, t] of Object.entries(aliases)) { (tierAliases[t] ??= []).push(a); }
 
-        // Reuse cfg above for provider names (passthrough checkboxes)
-        const allProviderNames = Object.keys(cfg.providers || {});
-
         for (const [name, tier] of Object.entries(tiers)) {
-          const isPassthrough = !!tier.passthrough;
-          const allowedProviders = tier.allowed_providers || [];
-
           const models = (tier.models || []).map((m, i) => `
             <div class="tier-model" data-index="${i}" data-tier="${name}">
               <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
@@ -1113,41 +1155,18 @@ async function loadTiers() {
 
           const aliasStr = tierAliases[name] ? ` <span class="muted">(${tierAliases[name].join(', ')})</span>` : '';
 
-          const passthroughBadge = isPassthrough
-            ? ` <span class="muted" style="font-size:11px">⚡ passthrough</span>`
-            : '';
-          const passthroughBody = isPassthrough
-            ? `<div class="tier-model muted" style="padding:12px;flex-direction:column;align-items:flex-start;gap:8px">
-                 <div>⚡ <strong>Passthrough tier</strong> — any model from allowed providers routes through here.</div>
-                 <div>Allowed providers:
-                   ${allowedProviders.length
-                     ? allowedProviders.map(p => `<span class="provider" style="margin-right:6px">${escapeHtml(p)}</span>`).join('')
-                     : '<span class="text-amber">none set — add providers below</span>'}
-                 </div>
-                 <div style="display:flex;flex-wrap:wrap;gap:4px">
-                   ${allProviderNames.map(pn => `
-                     <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
-                       <input type="checkbox" data-prov-toggle="${name}" value="${escapeHtml(pn)}" ${allowedProviders.includes(pn) ? 'checked' : ''} />
-                       ${escapeHtml(pn)}
-                     </label>`).join('')}
-                 </div>
-               </div>`
-            : (models || '<div class="tier-model muted" style="padding:12px">No models — add one!</div>');
-
           const card = document.createElement('div');
           card.className = 'tier-card';
           card.dataset.tierName = name;
-          card.dataset.isPassthrough = isPassthrough ? '1' : '';
           card.innerHTML = `
             <div class="tier-header">
-              <span>${name.toUpperCase()}${aliasStr}${passthroughBadge}</span>
+              <span>${name.toUpperCase()}${aliasStr}</span>
               <span>
-                ${isPassthrough ? '' : `<button class="term-btn-sm" data-add="${name}">[+ MODEL]</button>`}
-                <button class="term-btn-sm" data-toggle-passthrough="${name}">[${isPassthrough ? '⚪ DISABLE PASSTHROUGH' : '⚡ PASSTHROUGH'}]</button>
+                <button class="term-btn-sm" data-add="${name}">[+ MODEL]</button>
                 <button class="term-btn-sm text-red" data-delete="${name}">[DELETE]</button>
               </span>
             </div>
-            ${passthroughBody}`;
+            ${models || '<div class="tier-model muted" style="padding:12px">No models — add one!</div>'}`;
 
           container.appendChild(card);
         }
@@ -1164,30 +1183,13 @@ function initTierDelegation() {
  if (c._pointerHandler) c.removeEventListener('pointerdown', c._pointerHandler);
  // Click handler for buttons (add/delete/remove)
  const clickHandler = async (e) => {
-  // Passthrough provider checkbox — don't treat as button click
-  if (e.target.matches('input[data-prov-toggle]')) return;
   const addBtn = e.target.closest('button[data-add]');
   if (addBtn) { _addModelTargetTier = addBtn.dataset.add; showAddModelModal(_addModelTargetTier); return; }
   const deleteBtn = e.target.closest('button[data-delete]');
   if (deleteBtn) { deleteTier(deleteBtn.dataset.delete); return; }
   const removeBtn = e.target.closest('button.remove-btn');
   if (removeBtn) { await removeModelFromTier(removeBtn.dataset.tier, parseInt(removeBtn.dataset.index, 10)); return; }
-  const passthroughToggleBtn = e.target.closest('button[data-toggle-passthrough]');
-  if (passthroughToggleBtn) { await togglePassthrough(passthroughToggleBtn.dataset.togglePassthrough); return; }
  };
- // Change handler for provider checkboxes (separate from click)
- if (!c._changeHandler) {
-  const changeHandler = async (e) => {
-   if (e.target.matches('input[data-prov-toggle]')) {
-    const tierName = e.target.dataset.provToggle;
-    const checked = e.target.checked;
-    const providerName = e.target.value;
-    await updatePassthroughProviders(tierName, providerName, checked);
-   }
-  };
-  c._changeHandler = changeHandler;
-  c.addEventListener('change', changeHandler);
- }
  c._clickHandler = clickHandler;
  c.addEventListener('click', clickHandler);
  // Pointer drag handler (handles both mouse + touch via Pointer Events API)
@@ -1362,33 +1364,6 @@ async function createTier() {
         });
         closeModal('addTierModal');
         loadTiers();
-    } catch (e) { alert(`Failed: ${e.message}`); }
-}
-
-async function togglePassthrough(tierName) {
-    try {
-        const tiers = await api('/api/tiers');
-        const tier = tiers[tierName] || {};
-        const isEnabled = !!tier.passthrough;
-        await api(`/api/tiers/${tierName}`, {
-            method: 'PUT',
-            body: JSON.stringify({ passthrough: !isEnabled, allowed_providers: tier.allowed_providers || [] }),
-        });
-        loadTiers();
-    } catch (e) { alert(`Failed: ${e.message}`); }
-}
-
-async function updatePassthroughProviders(tierName, providerName, checked) {
-    try {
-        const tiers = await api('/api/tiers');
-        const tier = tiers[tierName] || {};
-        const providers = new Set(tier.allowed_providers || []);
-        if (checked) providers.add(providerName);
-        else providers.delete(providerName);
-        await api(`/api/tiers/${tierName}`, {
-            method: 'PUT',
-            body: JSON.stringify({ passthrough: true, allowed_providers: [...providers] }),
-        });
     } catch (e) { alert(`Failed: ${e.message}`); }
 }
 
