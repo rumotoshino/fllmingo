@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
     watcher = asyncio.create_task(watch_config())
     probe = asyncio.create_task(health_probe_loop())
     logger.info("╔══════════════════════════════════════════╗")
-    logger.info("║  FLLMingo v1.3.0b3 — [SYSTEM ACTIVE]     ║")
+    logger.info("║  FLLMingo v1.3.0b4 — [SYSTEM ACTIVE]     ║")
     logger.info("╚══════════════════════════════════════════╝")
     yield
     watcher.cancel()
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     await _http_client.aclose()
 
 
-app = FastAPI(title="FLLMingo", version="1.3.0b4", lifespan=lifespan)
+app = FastAPI(title="FLLMingo", version="1.3.0b5", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -388,6 +388,26 @@ async def list_models(_=Depends(verify_auth)):
 # ═══════════════════════════════════════════════════════════════════
 #  Dashboard API
 # ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/version")
+async def api_version():
+    """Return the running FLLMingo version."""
+    # Try installed package metadata first, then fall back to pyproject.toml
+    try:
+        from importlib.metadata import version as _pkg_version
+        v = _pkg_version("fllmingo")
+    except Exception:
+        v = None
+    if not v or v == "unknown":
+        try:
+            import tomllib
+            _pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+            with open(_pyproject, "rb") as f:
+                v = tomllib.load(f).get("project", {}).get("version", "unknown")
+        except Exception:
+            v = "unknown"
+    return {"version": v}
+
 
 @app.get("/api/status")
 async def api_status():
@@ -814,10 +834,15 @@ async def api_create_tier(tier_name: str, request: Request):
     if tier_name in tiers:
         raise HTTPException(409, f"Tier '{tier_name}' already exists")
     body = await request.json()
-    tiers[tier_name] = {
+    tier_obj = {
         "models": body.get("models", []),
         "strategy": body.get("strategy", "fallback"),
     }
+    # Passthrough tier: allows any model from allowed_providers
+    if body.get("passthrough"):
+        tier_obj["passthrough"] = True
+        tier_obj["allowed_providers"] = body.get("allowed_providers", [])
+    tiers[tier_name] = tier_obj
     _save_config_yaml(cfg)
     return {"status": "ok", "tier": tier_name}
 
@@ -846,6 +871,14 @@ async def api_update_tier(tier_name: str, request: Request):
         target["models"] = body["models"]
     if "strategy" in body:
         target["strategy"] = body["strategy"]
+    # Passthrough fields
+    if "passthrough" in body:
+        if body["passthrough"]:
+            target["passthrough"] = True
+            target["allowed_providers"] = body.get("allowed_providers", [])
+        else:
+            target.pop("passthrough", None)
+            target.pop("allowed_providers", None)
 
     _save_config_yaml(cfg)
     return {"status": "ok", "tier": new_name}

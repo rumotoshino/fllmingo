@@ -647,6 +647,7 @@ function initApp() {
     initTheme();
     initNav();
     connectWS();
+    loadLogoVersion();
     loadStatus();
     loadUsage();
     refreshInterval = setInterval(() => { loadStatus(); loadUsage(); }, 5000);
@@ -928,7 +929,7 @@ async function loadStatus() {
         errEl.className = `stat-value ${data.stats.error_rate > 5 ? 'red' : data.stats.error_rate > 2 ? 'amber' : ''}`;
 
         const tokens = data.stats.prompt_tokens + data.stats.completion_tokens;
-        document.getElementById('statTokens').textContent = tokens > 1000 ? `${(tokens/1000).toFixed(1)}k` : tokens.toLocaleString();
+        document.getElementById('statTokens').textContent = formatTokens(tokens);
 
         // Health table
         const tbody = document.getElementById('healthBody');
@@ -1092,7 +1093,13 @@ async function loadTiers() {
         const tierAliases = {};
         for (const [a, t] of Object.entries(aliases)) { (tierAliases[t] ??= []).push(a); }
 
+        // Reuse cfg above for provider names (passthrough checkboxes)
+        const allProviderNames = Object.keys(cfg.providers || {});
+
         for (const [name, tier] of Object.entries(tiers)) {
+          const isPassthrough = !!tier.passthrough;
+          const allowedProviders = tier.allowed_providers || [];
+
           const models = (tier.models || []).map((m, i) => `
             <div class="tier-model" data-index="${i}" data-tier="${name}">
               <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
@@ -1106,22 +1113,43 @@ async function loadTiers() {
 
           const aliasStr = tierAliases[name] ? ` <span class="muted">(${tierAliases[name].join(', ')})</span>` : '';
 
+          const passthroughBadge = isPassthrough
+            ? ` <span class="muted" style="font-size:11px">⚡ passthrough</span>`
+            : '';
+          const passthroughBody = isPassthrough
+            ? `<div class="tier-model muted" style="padding:12px;flex-direction:column;align-items:flex-start;gap:8px">
+                 <div>⚡ <strong>Passthrough tier</strong> — any model from allowed providers routes through here.</div>
+                 <div>Allowed providers:
+                   ${allowedProviders.length
+                     ? allowedProviders.map(p => `<span class="provider" style="margin-right:6px">${escapeHtml(p)}</span>`).join('')
+                     : '<span class="text-amber">none set — add providers below</span>'}
+                 </div>
+                 <div style="display:flex;flex-wrap:wrap;gap:4px">
+                   ${allProviderNames.map(pn => `
+                     <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">
+                       <input type="checkbox" data-prov-toggle="${name}" value="${escapeHtml(pn)}" ${allowedProviders.includes(pn) ? 'checked' : ''} />
+                       ${escapeHtml(pn)}
+                     </label>`).join('')}
+                 </div>
+               </div>`
+            : (models || '<div class="tier-model muted" style="padding:12px">No models — add one!</div>');
+
           const card = document.createElement('div');
           card.className = 'tier-card';
           card.dataset.tierName = name;
+          card.dataset.isPassthrough = isPassthrough ? '1' : '';
           card.innerHTML = `
             <div class="tier-header">
-              <span>${name.toUpperCase()}${aliasStr}</span>
+              <span>${name.toUpperCase()}${aliasStr}${passthroughBadge}</span>
               <span>
-                <button class="term-btn-sm" data-add="${name}">[+ MODEL]</button>
+                ${isPassthrough ? '' : `<button class="term-btn-sm" data-add="${name}">[+ MODEL]</button>`}
+                <button class="term-btn-sm" data-toggle-passthrough="${name}">[${isPassthrough ? '⚪ DISABLE PASSTHROUGH' : '⚡ PASSTHROUGH'}]</button>
                 <button class="term-btn-sm text-red" data-delete="${name}">[DELETE]</button>
               </span>
             </div>
-            ${models || '<div class="tier-model muted" style="padding:12px">No models — add one!</div>'}`;
+            ${passthroughBody}`;
 
-          if (tier.models && tier.models.length) {
-            container.appendChild(card);
-          }
+          container.appendChild(card);
         }
 
         initTierDelegation();
@@ -1136,13 +1164,30 @@ function initTierDelegation() {
  if (c._pointerHandler) c.removeEventListener('pointerdown', c._pointerHandler);
  // Click handler for buttons (add/delete/remove)
  const clickHandler = async (e) => {
+  // Passthrough provider checkbox — don't treat as button click
+  if (e.target.matches('input[data-prov-toggle]')) return;
   const addBtn = e.target.closest('button[data-add]');
   if (addBtn) { _addModelTargetTier = addBtn.dataset.add; showAddModelModal(_addModelTargetTier); return; }
   const deleteBtn = e.target.closest('button[data-delete]');
   if (deleteBtn) { deleteTier(deleteBtn.dataset.delete); return; }
   const removeBtn = e.target.closest('button.remove-btn');
   if (removeBtn) { await removeModelFromTier(removeBtn.dataset.tier, parseInt(removeBtn.dataset.index, 10)); return; }
+  const passthroughToggleBtn = e.target.closest('button[data-toggle-passthrough]');
+  if (passthroughToggleBtn) { await togglePassthrough(passthroughToggleBtn.dataset.togglePassthrough); return; }
  };
+ // Change handler for provider checkboxes (separate from click)
+ if (!c._changeHandler) {
+  const changeHandler = async (e) => {
+   if (e.target.matches('input[data-prov-toggle]')) {
+    const tierName = e.target.dataset.provToggle;
+    const checked = e.target.checked;
+    const providerName = e.target.value;
+    await updatePassthroughProviders(tierName, providerName, checked);
+   }
+  };
+  c._changeHandler = changeHandler;
+  c.addEventListener('change', changeHandler);
+ }
  c._clickHandler = clickHandler;
  c.addEventListener('click', clickHandler);
  // Pointer drag handler (handles both mouse + touch via Pointer Events API)
@@ -1317,6 +1362,33 @@ async function createTier() {
         });
         closeModal('addTierModal');
         loadTiers();
+    } catch (e) { alert(`Failed: ${e.message}`); }
+}
+
+async function togglePassthrough(tierName) {
+    try {
+        const tiers = await api('/api/tiers');
+        const tier = tiers[tierName] || {};
+        const isEnabled = !!tier.passthrough;
+        await api(`/api/tiers/${tierName}`, {
+            method: 'PUT',
+            body: JSON.stringify({ passthrough: !isEnabled, allowed_providers: tier.allowed_providers || [] }),
+        });
+        loadTiers();
+    } catch (e) { alert(`Failed: ${e.message}`); }
+}
+
+async function updatePassthroughProviders(tierName, providerName, checked) {
+    try {
+        const tiers = await api('/api/tiers');
+        const tier = tiers[tierName] || {};
+        const providers = new Set(tier.allowed_providers || []);
+        if (checked) providers.add(providerName);
+        else providers.delete(providerName);
+        await api(`/api/tiers/${tierName}`, {
+            method: 'PUT',
+            body: JSON.stringify({ passthrough: true, allowed_providers: [...providers] }),
+        });
     } catch (e) { alert(`Failed: ${e.message}`); }
 }
 
@@ -1638,10 +1710,27 @@ function escapeHtml(text) {
 }
 
 function formatNumber(n) {
- if (n == null) return '—';
- const num = Number(n);
- if (!Number.isFinite(num)) return String(n);
- return num.toLocaleString();
+	if (n == null) return '—';
+	const num = Number(n);
+	if (!Number.isFinite(num)) return String(n);
+	return num.toLocaleString();
+}
+
+function formatTokens(n) {
+	if (n == null) return '—';
+	const num = Number(n);
+	if (!Number.isFinite(num)) return String(n);
+	if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}m`;
+	if (num >= 1_000) return `${(num / 1_000).toFixed(1)}k`;
+	return num.toLocaleString();
+}
+
+async function loadLogoVersion() {
+	try {
+		const data = await api('/api/version');
+		const el = document.getElementById('logoVersion');
+		if (el && data.version) el.textContent = data.version;
+	} catch { /* fail silent */ }
 }
 
 async function loadConfig() {

@@ -138,16 +138,30 @@ async def route_request(
         else:
             # Passthrough — model is not a tier name, try to route directly
             tier_name = "passthrough"
+            # Find passthrough tiers and their allowed_providers
+            all_tiers = config.get("tiers", {})
+            passthrough_providers = set()
+            passthrough_tier = None
+            for t_name, t_cfg in all_tiers.items():
+                if t_cfg.get("passthrough"):
+                    passthrough_tier = t_name
+                    passthrough_providers.update(t_cfg.get("allowed_providers", []))
             # Find which provider serves this model
             candidates = []
-            for prov_name, prov_cfg in get_config().get("providers", {}).items():
+            for prov_name, prov_cfg in config.get("providers", {}).items():
+                # If passthrough tiers exist, only search their allowed_providers
+                if passthrough_providers and prov_name not in passthrough_providers:
+                    continue
                 models = prov_cfg.get("models", {})
                 if incoming_model in models or "*" in models:
                     candidates.append({"provider": prov_name, "model": incoming_model})
             if not candidates:
-                yield ("error", {"code": 404, "message": f"No provider found for model '{incoming_model}'"})
+                if passthrough_providers:
+                    yield ("error", {"code": 404, "message": f"No provider for '{incoming_model}' in allowed providers: {sorted(passthrough_providers)}"})
+                else:
+                    yield ("error", {"code": 404, "message": f"No provider found for model '{incoming_model}'"})
                 return
-            yield ("status", {"phase": "resolved", "tier": "passthrough", "candidates": len(candidates)})
+            yield ("status", {"phase": "resolved", "tier": passthrough_tier or "passthrough", "candidates": len(candidates)})
 
     # ── Try each candidate (fallback chain) ───────────────────────
     last_error = ""

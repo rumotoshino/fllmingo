@@ -138,9 +138,48 @@ async def get_daily_stats() -> dict[str, Any]:
 
 
 async def get_provider_stats() -> list[dict[str, Any]]:
-    """Per-provider health from the provider_health table."""
+    """Per-provider health from the provider_health table.
+
+    Auto-heals stale 'degraded' status: if the recovery_timeout has passed
+    since the last failure (and the provider isn't actively quarantined),
+    the status is rewritten back to 'healthy' so the dashboard reflects
+    "probably fine again" rather than getting stuck on a single past error.
+    """
+    from .config import get_config
+    _cb = get_config().get("circuit_breaker", {})
+    _recovery = int(_cb.get("recovery_timeout", 60))
+
     async with aiosqlite.connect(_DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        # First pass: self-heal anything stale.
+        # NOTE: last_failure is stored in Python ISO8601 format (with 'T' separator)
+        # while SQLite's datetime() returns 'YYYY-MM-DD HH:MM:SS' (space). Direct
+        # string comparison breaks ('T' > ' '), so wrap both sides in datetime()
+        # to normalize before comparing.
+        await db.execute(
+            """UPDATE provider_health
+                  SET status='healthy',
+                      consecutive_failures=0,
+                      quarantined_until=NULL
+                WHERE status='degraded'
+                  AND (
+                        last_failure IS NULL
+                        OR datetime(last_failure) < datetime('now', '-' || ? || ' seconds')
+                  )""",
+            (_recovery,),
+        )
+        # Also: clear expired quarantines so they show healthy again.
+        await db.execute(
+            """UPDATE provider_health
+                  SET status='healthy',
+                      consecutive_failures=0,
+                      quarantined_until=NULL
+                WHERE status='quarantined'
+                  AND quarantined_until IS NOT NULL
+                  AND datetime(quarantined_until) < datetime('now')"""
+        )
+        await db.commit()
+
         cursor = await db.execute(
             """SELECT provider, status, consecutive_failures,
                       last_failure, last_success, quarantined_until,

@@ -3,6 +3,19 @@
 All notable changes to FLLMingo are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0b5] - 2026-06-28
+
+### Fixed
+- **Version sync**: logo version now fetched from new `/api/version` endpoint (falls back to pyproject.toml)
+- **Token formatting**: values ≥ 1,000,000 now show as `1.0m` instead of `1000.0k`
+- **Tier creation**: empty tiers no longer hidden by stale `models.length` guard
+
+### Added
+- **Passthrough tiers**: tier-level `allowed_providers` allowlist; any model from those providers routes through without explicit model entries
+- **Circuit breaker toggle** (from v1.3.0b4)
+
+### Audited
+- **Concurrency**: confirmed full async stack (FastAPI + uvicorn + httpx.AsyncClient + aiosqlite), no blocking I/O
 ## [1.3.0b4] - 2026-06-27
 
 ### Added
