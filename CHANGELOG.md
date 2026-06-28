@@ -3,6 +3,18 @@
 All notable changes to FLLMingo are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0b6] - 2026-06-28
+
+### Changed
+- **Passthrough reworked**: moved from per-tier flag to global toggle + provider allowlist.
+  When enabled, any model from ticked providers' live catalog is routable and listed in
+  `/v1/models`. Unticked providers expose only direct aliases. Tier-level `passthrough`/
+  `allowed_providers` fields removed.
+
+### Migration
+- Remove `passthrough`/`allowed_providers` from any tier in config.yaml
+- Add top-level `passthrough: {enabled: false, providers: []}` block
+
 ## [1.3.0b5] - 2026-06-28
 
 ### Fixed

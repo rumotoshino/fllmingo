@@ -15,6 +15,7 @@ FLLMingo is an OpenAI-compatible proxy that routes your `/v1/chat/completions` r
 | | |
 |---|---|
 | 🔀 **Tiered routing** | Define tiers (`fast`, `standard`, `complex`) and FLLMingo picks the best healthy provider |
+| ⚡ **Passthrough mode** | Global toggle: enable to route any model from allowlisted providers' full catalog |
 | 🔁 **Automatic fallback** | When a provider 5xx's, the next one in the tier picks up instantly |
 | 🛡️ **Circuit breaker** | Quarantines failing providers, recovers after a cooldown |
 | 🧪 **Auto-strip retry** | Removes incompatible params (`reasoning_effort`, `service_tier`, ...) on 400 errors |
