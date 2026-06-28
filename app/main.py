@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
     watcher = asyncio.create_task(watch_config())
     probe = asyncio.create_task(health_probe_loop())
     logger.info("╔══════════════════════════════════════════╗")
-    logger.info("║  FLLMingo v1.3.0b4 — [SYSTEM ACTIVE]     ║")
+    logger.info("║  FLLMingo v1.3.0b6 — [SYSTEM ACTIVE]     ║")
     logger.info("╚══════════════════════════════════════════╝")
     yield
     watcher.cancel()
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     await _http_client.aclose()
 
 
-app = FastAPI(title="FLLMingo", version="1.3.0b5", lifespan=lifespan)
+app = FastAPI(title="FLLMingo", version="1.3.0b6", lifespan=lifespan)
 
 
 @app.middleware("http")
