@@ -100,6 +100,28 @@ def get_tier_config(tier_name: str) -> dict[str, Any] | None:
     return cfg.get("tiers", {}).get(tier_name)
 
 
+def get_passthrough_config() -> dict[str, Any]:
+    """Return the global passthrough config block.
+
+    Shape: {"enabled": bool, "providers": list[str]}
+    Missing → disabled with empty provider list.
+    """
+    cfg = get_config()
+    pt = cfg.get("passthrough", {})
+    if not isinstance(pt, dict):
+        return {"enabled": False, "providers": []}
+    return {
+        "enabled": bool(pt.get("enabled", False)),
+        "providers": list(pt.get("providers", []) or []),
+    }
+
+
+def is_passthrough_provider(provider_name: str) -> bool:
+    """True if this provider is in the passthrough allowlist AND toggle is ON."""
+    pt = get_passthrough_config()
+    return pt["enabled"] and provider_name in pt["providers"]
+
+
 def resolve_tier(model_field: str) -> tuple[str, dict[str, Any]] | None:
     """Resolve a model string to (tier_name, tier_config).
 
