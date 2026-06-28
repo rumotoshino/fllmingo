@@ -288,6 +288,30 @@ async def api_update_circuit_breaker(request: Request):
     return {"status": "ok"}
 
 
+@app.get("/api/settings/passthrough")
+async def api_get_passthrough():
+    """Return current passthrough config."""
+    from .config import get_passthrough_config
+    return get_passthrough_config()
+
+
+@app.put("/api/settings/passthrough")
+async def api_update_passthrough(request: Request):
+    """Update passthrough toggle + provider allowlist.
+
+    Body: {"enabled": bool, "providers": ["openrouter", "nvidia"]}
+    """
+    from .config import get_config
+    body = await request.json()
+    cfg = get_config()
+    cfg["passthrough"] = {
+        "enabled": bool(body.get("enabled", False)),
+        "providers": list(body.get("providers", []) or []),
+    }
+    _save_config_yaml(cfg)
+    return {"status": "ok"}
+
+
 #  OpenAI-compatible API
 # ═══════════════════════════════════════════════════════════════════
 
@@ -381,6 +405,26 @@ async def list_models(_=Depends(verify_auth)):
             "owned_by": "fllmingo",
             "fllmingo_tier": True,
         })
+
+    # 3. Passthrough models — full catalog of allowlisted providers
+    from .config import get_passthrough_config
+    pt = get_passthrough_config()
+    if pt["enabled"] and _catalog_cache["data"]:
+        allowed = set(pt["providers"])
+        for m in _catalog_cache["data"]:
+            if m["provider"] not in allowed:
+                continue
+            mid = m["id"]
+            if mid in seen_ids:
+                continue
+            seen_ids.add(mid)
+            models_list.append({
+                "id": mid,
+                "object": "model",
+                "owned_by": m.get("owned_by", m["provider"]),
+                "fllmingo_passthrough": True,
+                "fllmingo_provider": m["provider"],
+            })
 
     return {"object": "list", "data": models_list}
 
@@ -685,9 +729,12 @@ async def api_catalog(
                         "output_price": mcfg.get("cost_per_1k_output"),
                     }
             try:
+                req_headers = {}
+                if key:
+                    req_headers["Authorization"] = f"Bearer {key}"
                 resp = await _http_client.get(
                     f"{endpoint}/models",
-                    headers={"Authorization": f"Bearer {key}"},
+                    headers=req_headers,
                     timeout=15,
                 )
                 if resp.status_code == 200:
@@ -838,10 +885,6 @@ async def api_create_tier(tier_name: str, request: Request):
         "models": body.get("models", []),
         "strategy": body.get("strategy", "fallback"),
     }
-    # Passthrough tier: allows any model from allowed_providers
-    if body.get("passthrough"):
-        tier_obj["passthrough"] = True
-        tier_obj["allowed_providers"] = body.get("allowed_providers", [])
     tiers[tier_name] = tier_obj
     _save_config_yaml(cfg)
     return {"status": "ok", "tier": tier_name}
@@ -871,14 +914,6 @@ async def api_update_tier(tier_name: str, request: Request):
         target["models"] = body["models"]
     if "strategy" in body:
         target["strategy"] = body["strategy"]
-    # Passthrough fields
-    if "passthrough" in body:
-        if body["passthrough"]:
-            target["passthrough"] = True
-            target["allowed_providers"] = body.get("allowed_providers", [])
-        else:
-            target.pop("passthrough", None)
-            target.pop("allowed_providers", None)
 
     _save_config_yaml(cfg)
     return {"status": "ok", "tier": new_name}
@@ -1430,9 +1465,12 @@ async def health_probe_loop():
                     continue
                 try:
                     if _http_client:
+                        probe_headers = {}
+                        if key:
+                            probe_headers["Authorization"] = f"Bearer {key}"
                         resp = await _http_client.get(
                             f"{endpoint}/models",
-                            headers={"Authorization": f"Bearer {key}"},
+                            headers=probe_headers,
                             timeout=10,
                         )
                         if resp.status_code == 200:
