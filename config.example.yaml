@@ -60,6 +60,12 @@ routing:
     - reasoning_effort
     - service_tier
 
+# Passthrough — when enabled, any model from listed providers' full catalog
+# is routable and shown in /v1/models. Unticked providers expose only direct aliases.
+passthrough:
+  enabled: false
+  providers: []
+
 # Circuit breaker — quarantines unhealthy providers
 circuit_breaker:
   failure_threshold: 3
