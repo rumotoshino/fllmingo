@@ -50,8 +50,25 @@ async def _forward_to_provider(
 
     # Override the model name in the payload
     body = {**payload, "model": model}
+    is_stream_req = body.get("stream", False)
 
     try:
+        if is_stream_req:
+            # Streaming: use client.send(stream=True) to avoid buffering the
+            # full SSE response before forwarding (which drops chunks on
+            # providers that send many small deltas like kiro/claude).
+            timeout_obj = httpx.Timeout(timeout)
+            request = client.build_request(
+                "POST", url, json=body, headers=headers, timeout=timeout_obj,
+            )
+            resp = await client.send(request, stream=True)
+            if resp.status_code == 200:
+                return 200, resp, ""
+            # Non-200: drain body, close stream, return error text
+            await resp.aread()
+            text = resp.text
+            await resp.aclose()
+            return resp.status_code, text, f"HTTP {resp.status_code}: {text[:200]}"
         resp = await client.post(url, json=body, headers=headers, timeout=timeout)
         if resp.status_code == 200:
             return 200, resp, ""
@@ -210,28 +227,46 @@ async def route_request(
             await db.update_provider_health(prov_name, success=True)
 
             if is_stream and isinstance(response, httpx.Response):
-                # Stream SSE chunks back to client
+                # Stream SSE chunks back to client using aiter_bytes for raw
+                # byte-perfect forwarding. aiter_lines() drops empty lines
+                # (SSE event delimiters) and decodes inconsistently, which
+                # caused chunks to be lost on providers like kiro that emit
+                # many small reasoning_content deltas.
                 collected_prompt_tokens = 0
                 collected_completion_tokens = 0
-                async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        yield ("chunk", line + "\n\n")
-                        # Try to extract usage from final chunk
-                        if "[DONE]" not in line:
-                            try:
-                                chunk_data = json.loads(line[6:])
-                                usage = chunk_data.get("usage") or {}
-                                # Providers send CUMULATIVE usage; take latest non-zero
-                                pt = usage.get("prompt_tokens")
-                                ct = usage.get("completion_tokens")
-                                if pt is not None:
-                                    collected_prompt_tokens = pt
-                                if ct is not None:
-                                    collected_completion_tokens = ct
-                            except json.JSONDecodeError:
-                                pass
-                    elif line.strip():
-                        yield ("chunk", line + "\n\n")
+                buffer = ""
+                try:
+                    async for raw in response.aiter_bytes():
+                        if not raw:
+                            continue
+                        chunk_str = raw.decode("utf-8", errors="replace")
+                        # Forward bytes as-is to preserve SSE framing exactly
+                        yield ("chunk", chunk_str)
+                        # Accumulate for usage parsing (split on event boundaries)
+                        buffer += chunk_str
+                        while "\n\n" in buffer:
+                            event, buffer = buffer.split("\n\n", 1)
+                            for line in event.split("\n"):
+                                if not line.startswith("data: "):
+                                    continue
+                                data_str = line[6:]
+                                if "[DONE]" in data_str:
+                                    continue
+                                try:
+                                    chunk_data = json.loads(data_str)
+                                    usage = chunk_data.get("usage") or {}
+                                    pt = usage.get("prompt_tokens")
+                                    ct = usage.get("completion_tokens")
+                                    if pt is not None:
+                                        collected_prompt_tokens = pt
+                                    if ct is not None:
+                                        collected_completion_tokens = ct
+                                except json.JSONDecodeError:
+                                    pass
+                finally:
+                    # Ensure the streaming response is always closed, even on
+                    # client disconnect (GeneratorExit) or exceptions.
+                    await response.aclose()
 
                 # Log to DB BEFORE yielding "done" so the frontend refresh sees fresh data
                 model_cfg = prov_cfg.get("models", {}).get(model_name, {})
